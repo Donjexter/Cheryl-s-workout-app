@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workout Tracker</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  background: #111;
+  color: white;
+}
+.container { padding: 20px; }
+button {
+  padding: 10px;
+  margin: 5px 0;
+  background: #2a2a2a;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 100%;
+}
+input {
+  padding: 8px;
+  margin: 4px 0;
+  border-radius: 6px;
+  border: none;
+  width: 100%;
+}
+.exercise-card {
+  background: #1c1c1c;
+  padding: 10px;
+  margin: 8px 0;
+  border-radius: 10px;
+}
+.timer {
+  font-size: 28px;
+  text-align: center;
+  margin: 10px 0;
+}
+.small-btn {
+  width: auto;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+<div class="container" id="app"></div>
+
+<script>
+let data = JSON.parse(localStorage.getItem("workoutApp")) || {
+  templates: [],
+  activeWorkout: null
+};
+
+function save() {
+  localStorage.setItem("workoutApp", JSON.stringify(data));
+}
+
+function renderHome() {
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <h2>Workout Templates</h2>
+    <button onclick="createTemplate()">+ Create Template</button>
+    ${data.templates.map((t,i)=>`
+      <div class="exercise-card">
+        <b>${t.name}</b><br>
+        <button onclick="startWorkout(${i})">Start</button>
+        <button onclick="editTemplate(${i})">Edit</button>
+        <button onclick="deleteTemplate(${i})">Delete</button>
+      </div>
+    `).join("")}
+  `;
+}
+
+function createTemplate() {
+  const name = prompt("Template Name:");
+  if(!name) return;
+  data.templates.push({
+    name,
+    rest: 120,
+    repRange: "8-15",
+    exercises: []
+  });
+  save();
+  renderHome();
+}
+
+function deleteTemplate(i){
+  if(confirm("Delete template?")){
+    data.templates.splice(i,1);
+    save();
+    renderHome();
+  }
+}
+
+function editTemplate(i){
+  const template = data.templates[i];
+  const app = document.getElementById("app");
+
+  app.innerHTML = `
+    <button onclick="renderHome()">← Back</button>
+    <h2>${template.name}</h2>
+    <label>Rest (seconds)</label>
+    <input value="${template.rest}" onchange="updateRest(${i},this.value)">
+    <h3>Exercises</h3>
+    ${template.exercises.map((e,ei)=>`
+      <div class="exercise-card">
+        ${e.name} (${e.sets} sets)
+        <br>
+        <button class="small-btn" onclick="moveUp(${i},${ei})">↑</button>
+        <button class="small-btn" onclick="moveDown(${i},${ei})">↓</button>
+        <button class="small-btn" onclick="deleteExercise(${i},${ei})">Delete</button>
+      </div>
+    `).join("")}
+    <button onclick="addExercise(${i})">+ Add Exercise</button>
+  `;
+}
+
+function updateRest(i,val){
+  data.templates[i].rest = parseInt(val);
+  save();
+}
+
+function addExercise(i){
+  const name = prompt("Exercise name:");
+  const sets = prompt("Number of sets:", 2);
+  if(!name) return;
+  data.templates[i].exercises.push({
+    name,
+    sets: parseInt(sets)
+  });
+  save();
+  editTemplate(i);
+}
+
+function deleteExercise(i,ei){
+  data.templates[i].exercises.splice(ei,1);
+  save();
+  editTemplate(i);
+}
+
+function moveUp(i,ei){
+  if(ei===0) return;
+  const ex = data.templates[i].exercises;
+  [ex[ei-1],ex[ei]] = [ex[ei],ex[ei-1]];
+  save();
+  editTemplate(i);
+}
+
+function moveDown(i,ei){
+  const ex = data.templates[i].exercises;
+  if(ei===ex.length-1) return;
+  [ex[ei+1],ex[ei]] = [ex[ei],ex[ei+1]];
+  save();
+  editTemplate(i);
+}
+
+function startWorkout(i){
+  const template = JSON.parse(JSON.stringify(data.templates[i]));
+  template.currentExercise = 0;
+  template.logs = template.exercises.map(e=>({
+    name: e.name,
+    sets: Array(e.sets).fill({weight:"",reps:""})
+  }));
+  data.activeWorkout = template;
+  save();
+  renderWorkout();
+}
+
+let timerInterval=null;
+
+function startTimer(seconds){
+  let remaining = seconds;
+  const timerDiv = document.getElementById("timer");
+  clearInterval(timerInterval);
+  timerInterval = setInterval(()=>{
+    remaining--;
+    timerDiv.innerText = formatTime(remaining);
+    if(remaining<=0){
+      clearInterval(timerInterval);
+      alert("Rest over!");
+    }
+  },1000);
+}
+
+function formatTime(s){
+  const m = Math.floor(s/60);
+  const sec = s%60;
+  return `${m}:${sec<10?"0":""}${sec}`;
+}
+
+function renderWorkout(){
+  const w = data.activeWorkout;
+  const app = document.getElementById("app");
+
+  if(!w) return renderHome();
+
+  const exercise = w.logs[w.currentExercise];
+
+  app.innerHTML = `
+    <button onclick="endWorkout()">End Workout</button>
+    <h2>${exercise.name}</h2>
+    ${exercise.sets.map((set,si)=>`
+      <div class="exercise-card">
+        Set ${si+1}<br>
+        <input placeholder="Weight" value="${set.weight}" 
+          onchange="updateSet(${si},'weight',this.value)">
+        <input placeholder="Reps" value="${set.reps}" 
+          onchange="updateSet(${si},'reps',this.value)">
+        <button onclick="completeSet(${si})">Complete Set</button>
+      </div>
+    `).join("")}
+    <div class="timer" id="timer"></div>
+    <button onclick="nextExercise()">Next Exercise</button>
+  `;
+}
+
+function updateSet(si,key,val){
+  data.activeWorkout.logs[data.activeWorkout.currentExercise]
+    .sets[si][key]=val;
+  save();
+}
+
+function completeSet(si){
+  const set = data.activeWorkout.logs[data.activeWorkout.currentExercise].sets[si];
+  if(parseInt(set.reps)>15){
+    alert("More than 15 reps. Increase weight. Set not counted.");
+    return;
+  }
+  startTimer(data.activeWorkout.rest);
+}
+
+function nextExercise(){
+  if(data.activeWorkout.currentExercise 
+      < data.activeWorkout.logs.length-1){
+    data.activeWorkout.currentExercise++;
+    save();
+    renderWorkout();
+  } else {
+    alert("Workout complete!");
+    endWorkout();
+  }
+}
+
+function endWorkout(){
+  data.activeWorkout=null;
+  save();
+  renderHome();
+}
+
+renderHome();
+</script>
+</body>
+</html>
