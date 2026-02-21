@@ -1,309 +1,294 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Workout Tracker</title>
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   margin: 0;
-  background: #111;
-  color: white;
+  background: #f2f2f7;
 }
-.container { padding: 20px; }
-button {
-  padding: 10px;
-  margin: 5px 0;
-  background: #2a2a2a;
+header {
+  padding: 16px;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  background: white;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+nav {
+  display: flex;
+  background: white;
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  border-top: 1px solid #ddd;
+}
+nav button {
+  flex: 1;
+  padding: 14px;
+  background: none;
+  border: none;
+  font-size: 14px;
+}
+section {
+  padding: 16px;
+  padding-bottom: 80px;
+}
+.card {
+  background: white;
+  padding: 14px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}
+button.primary {
+  background: #2f6df6;
   color: white;
   border: none;
+  padding: 10px;
   border-radius: 8px;
   width: 100%;
+  margin-top: 8px;
+}
+button.secondary {
+  background: #e5e5ea;
+  border: none;
+  padding: 8px;
+  border-radius: 8px;
+  width: 100%;
+  margin-top: 6px;
 }
 input {
-  padding: 8px;
-  margin: 4px 0;
-  border-radius: 6px;
-  border: none;
   width: 100%;
+  padding: 8px;
+  margin-top: 6px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
 }
-.exercise-card {
-  background: #1c1c1c;
-  padding: 10px;
-  margin: 8px 0;
-  border-radius: 10px;
+.set-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
 }
-.timer {
-  font-size: 28px;
-  text-align: center;
-  margin: 10px 0;
+.set-row input {
+  flex: 1;
 }
-.small-btn {
-  width: auto;
-  padding: 5px 10px;
-  font-size: 12px;
-}
+.hidden { display: none; }
+.small { font-size: 12px; color: gray; }
 </style>
 </head>
 <body>
-<div class="container" id="app"></div>
+
+<header>Workout Tracker</header>
+
+<section id="exercises"></section>
+<section id="workouts" class="hidden"></section>
+<section id="start" class="hidden"></section>
+<section id="progress" class="hidden"></section>
+
+<nav>
+<button onclick="showTab('exercises')">Exercises</button>
+<button onclick="showTab('workouts')">Workouts</button>
+<button onclick="showTab('start')">Start</button>
+<button onclick="showTab('progress')">Progress</button>
+</nav>
 
 <script>
-
-let defaultTemplates = [
-  {
-    name: "Upper 1 – Pull Dominant",
-    rest: 120,
-    repRange: "8-15",
-    exercises: [
-      { name: "Vertical Pull (Wide Grip)", sets: 2 },
-      { name: "Horizontal Row", sets: 2 },
-      { name: "Vertical Pull (Close / Neutral)", sets: 2 },
-      { name: "Incline Press (60°)", sets: 2 },
-      { name: "Lateral Raises", sets: 2 },
-      { name: "Optional Arms", sets: 2 }
-    ]
-  },
-  {
-    name: "Lower 1 – Quad Emphasis",
-    rest: 120,
-    repRange: "8-15",
-    exercises: [
-      { name: "Quad Dominant Squat", sets: 3 },
-      { name: "Bulgarian Split Squats (Shorter Stride)", sets: 3 },
-      { name: "Romanian Deadlift", sets: 3 },
-      { name: "Hip Thrust", sets: 3 }
-    ]
-  },
-  {
-    name: "Upper 2 – Push Dominant",
-    rest: 120,
-    repRange: "8-15",
-    exercises: [
-      { name: "Overhead Press", sets: 2 },
-      { name: "Incline Press (60°)", sets: 2 },
-      { name: "Lateral Raises", sets: 2 },
-      { name: "Horizontal Row (Different Variation)", sets: 2 },
-      { name: "Vertical Pull (Neutral or Supinated)", sets: 2 },
-      { name: "Optional Arms", sets: 2 }
-    ]
-  },
-  {
-    name: "Lower 2 – Glute / Hinge Emphasis",
-    rest: 120,
-    repRange: "8-15",
-    exercises: [
-      { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
-      { name: "Hip Thrust (Heavier Than Lower 1)", sets: 3 },
-      { name: "Glute Dominant Squat", sets: 3 },
-      { name: "Bulgarian Split Squats (Longer Stride)", sets: 3 }
-    ]
-  }
-];
-
-let data = JSON.parse(localStorage.getItem("workoutApp")) || {
-  templates: defaultTemplates,
-  activeWorkout: null
-};
+let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
+let workouts = JSON.parse(localStorage.getItem('workouts')) || [];
+let sessions = JSON.parse(localStorage.getItem('sessions')) || [];
+let activeSession = null;
 
 function save() {
-  localStorage.setItem("workoutApp", JSON.stringify(data));
+  localStorage.setItem('exercises', JSON.stringify(exercises));
+  localStorage.setItem('workouts', JSON.stringify(workouts));
+  localStorage.setItem('sessions', JSON.stringify(sessions));
 }
 
-function renderHome() {
-  const app = document.getElementById("app");
-  app.innerHTML = `
-    <h2>Workout Templates</h2>
-    <button onclick="createTemplate()">+ Create Template</button>
-    ${data.templates.map((t,i)=>`
-      <div class="exercise-card">
-        <b>${t.name}</b><br>
-        <button onclick="startWorkout(${i})">Start</button>
-        <button onclick="editTemplate(${i})">Edit</button>
-        <button onclick="deleteTemplate(${i})">Delete</button>
-      </div>
-    `).join("")}
+function showTab(id) {
+  document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  if(id === "exercises") renderExercises();
+  if(id === "workouts") renderWorkouts();
+  if(id === "start") renderStart();
+  if(id === "progress") renderProgress();
+}
+
+/* ================= EXERCISES ================= */
+
+function renderExercises() {
+  const container = document.getElementById('exercises');
+  container.innerHTML = `
+    <div class="card">
+      <h3>Add Exercise</h3>
+      <input id="exName" placeholder="Name">
+      <button class="primary" onclick="addExercise()">Add</button>
+    </div>
   `;
+  exercises.forEach(e => {
+    container.innerHTML += `
+      <div class="card">
+        <strong>${e.name}</strong>
+        <button class="secondary" onclick="deleteExercise('${e.id}')">Delete</button>
+      </div>
+    `;
+  });
 }
 
-function createTemplate() {
-  const name = prompt("Template Name:");
+function addExercise() {
+  const name = document.getElementById('exName').value;
   if(!name) return;
-  data.templates.push({
+  exercises.push({ id: Date.now().toString(), name });
+  save();
+  renderExercises();
+}
+
+function deleteExercise(id) {
+  exercises = exercises.filter(e => e.id !== id);
+  save();
+  renderExercises();
+}
+
+/* ================= WORKOUTS ================= */
+
+function renderWorkouts() {
+  const container = document.getElementById('workouts');
+  container.innerHTML = `
+    <div class="card">
+      <h3>Create Workout</h3>
+      <input id="workoutName" placeholder="Workout Name">
+      <button class="primary" onclick="createWorkout()">Create</button>
+    </div>
+  `;
+  workouts.forEach(w => {
+    container.innerHTML += `
+      <div class="card">
+        <strong>${w.name}</strong>
+      </div>
+    `;
+  });
+}
+
+function createWorkout() {
+  const name = document.getElementById('workoutName').value;
+  if(!name) return;
+  workouts.push({
+    id: Date.now().toString(),
     name,
-    rest: 120,
-    repRange: "8-15",
-    exercises: []
+    exercises: exercises.map(e => e.id)
   });
   save();
-  renderHome();
+  renderWorkouts();
 }
 
-function deleteTemplate(i){
-  if(confirm("Delete template?")){
-    data.templates.splice(i,1);
-    save();
-    renderHome();
-  }
-}
+/* ================= START WORKOUT ================= */
 
-function editTemplate(i){
-  const template = data.templates[i];
-  const app = document.getElementById("app");
+function renderStart() {
+  const container = document.getElementById('start');
+  container.innerHTML = "";
 
-  app.innerHTML = `
-    <button onclick="renderHome()">← Back</button>
-    <h2>${template.name}</h2>
-    <label>Rest (seconds)</label>
-    <input value="${template.rest}" onchange="updateRest(${i},this.value)">
-    <h3>Exercises</h3>
-    ${template.exercises.map((e,ei)=>`
-      <div class="exercise-card">
-        ${e.name} (${e.sets} sets)
-        <br>
-        <button class="small-btn" onclick="moveUp(${i},${ei})">↑</button>
-        <button class="small-btn" onclick="moveDown(${i},${ei})">↓</button>
-        <button class="small-btn" onclick="deleteExercise(${i},${ei})">Delete</button>
-      </div>
-    `).join("")}
-    <button onclick="addExercise(${i})">+ Add Exercise</button>
-  `;
-}
-
-function updateRest(i,val){
-  data.templates[i].rest = parseInt(val);
-  save();
-}
-
-function addExercise(i){
-  const name = prompt("Exercise name:");
-  const sets = prompt("Number of sets:", 2);
-  if(!name) return;
-  data.templates[i].exercises.push({
-    name,
-    sets: parseInt(sets)
-  });
-  save();
-  editTemplate(i);
-}
-
-function deleteExercise(i,ei){
-  data.templates[i].exercises.splice(ei,1);
-  save();
-  editTemplate(i);
-}
-
-function moveUp(i,ei){
-  if(ei===0) return;
-  const ex = data.templates[i].exercises;
-  [ex[ei-1],ex[ei]] = [ex[ei],ex[ei-1]];
-  save();
-  editTemplate(i);
-}
-
-function moveDown(i,ei){
-  const ex = data.templates[i].exercises;
-  if(ei===ex.length-1) return;
-  [ex[ei+1],ex[ei]] = [ex[ei],ex[ei+1]];
-  save();
-  editTemplate(i);
-}
-
-function startWorkout(i){
-  const template = JSON.parse(JSON.stringify(data.templates[i]));
-  template.currentExercise = 0;
-  template.logs = template.exercises.map(e=>({
-    name: e.name,
-    sets: Array.from({length: e.sets}, () => ({weight:"",reps:""}))
-  }));
-  data.activeWorkout = template;
-  save();
-  renderWorkout();
-}
-
-let timerInterval=null;
-
-function startTimer(seconds){
-  let remaining = seconds;
-  const timerDiv = document.getElementById("timer");
-  clearInterval(timerInterval);
-  timerDiv.innerText = formatTime(remaining);
-  timerInterval = setInterval(()=>{
-    remaining--;
-    timerDiv.innerText = formatTime(remaining);
-    if(remaining<=0){
-      clearInterval(timerInterval);
-      alert("Rest over!");
-    }
-  },1000);
-}
-
-function formatTime(s){
-  const m = Math.floor(s/60);
-  const sec = s%60;
-  return `${m}:${sec<10?"0":""}${sec}`;
-}
-
-function renderWorkout(){
-  const w = data.activeWorkout;
-  if(!w) return renderHome();
-
-  const exercise = w.logs[w.currentExercise];
-  const app = document.getElementById("app");
-
-  app.innerHTML = `
-    <button onclick="endWorkout()">End Workout</button>
-    <h2>${exercise.name}</h2>
-    ${exercise.sets.map((set,si)=>`
-      <div class="exercise-card">
-        Set ${si+1}<br>
-        <input placeholder="Weight" value="${set.weight}" 
-          onchange="updateSet(${si},'weight',this.value)">
-        <input placeholder="Reps" value="${set.reps}" 
-          onchange="updateSet(${si},'reps',this.value)">
-        <button onclick="completeSet(${si})">Complete Set</button>
-      </div>
-    `).join("")}
-    <div class="timer" id="timer"></div>
-    <button onclick="nextExercise()">Next Exercise</button>
-  `;
-}
-
-function updateSet(si,key,val){
-  data.activeWorkout.logs[data.activeWorkout.currentExercise]
-    .sets[si][key]=val;
-  save();
-}
-
-function completeSet(si){
-  const set = data.activeWorkout.logs[data.activeWorkout.currentExercise].sets[si];
-  if(parseInt(set.reps)>15){
-    alert("More than 15 reps. Increase weight. Set not counted.");
+  if(activeSession) {
+    renderActiveSession();
     return;
   }
-  startTimer(data.activeWorkout.rest);
+
+  workouts.forEach(w => {
+    container.innerHTML += `
+      <div class="card">
+        <strong>${w.name}</strong>
+        <button class="primary" onclick="startWorkout('${w.id}')">Start</button>
+      </div>
+    `;
+  });
 }
 
-function nextExercise(){
-  if(data.activeWorkout.currentExercise 
-      < data.activeWorkout.logs.length-1){
-    data.activeWorkout.currentExercise++;
-    save();
-    renderWorkout();
-  } else {
-    alert("Workout complete!");
-    endWorkout();
-  }
+function startWorkout(id) {
+  const workout = workouts.find(w => w.id === id);
+  activeSession = {
+    id: Date.now().toString(),
+    workoutId: id,
+    date: new Date().toISOString(),
+    logs: workout.exercises.map(exId => ({
+      exerciseId: exId,
+      sets: []
+    }))
+  };
+  renderActiveSession();
 }
 
-function endWorkout(){
-  data.activeWorkout=null;
+function renderActiveSession() {
+  const container = document.getElementById('start');
+  const workout = workouts.find(w => w.id === activeSession.workoutId);
+  container.innerHTML = `<h3>${workout.name}</h3>`;
+
+  activeSession.logs.forEach((log, index) => {
+    const exercise = exercises.find(e => e.id === log.exerciseId);
+    container.innerHTML += `
+      <div class="card">
+        <strong>${exercise?.name || "Exercise"}</strong>
+        <div id="sets-${index}"></div>
+        <button class="secondary" onclick="addSet(${index})">Add Set</button>
+      </div>
+    `;
+    renderSets(index);
+  });
+
+  container.innerHTML += `
+    <button class="primary" onclick="finishWorkout()">Finish Workout</button>
+  `;
+}
+
+function renderSets(logIndex) {
+  const log = activeSession.logs[logIndex];
+  const container = document.getElementById(`sets-${logIndex}`);
+  container.innerHTML = "";
+
+  log.sets.forEach((set, setIndex) => {
+    container.innerHTML += `
+      <div class="set-row">
+        <input type="number" placeholder="Weight"
+          value="${set.weight || ""}"
+          oninput="updateSet(${logIndex},${setIndex},'weight',this.value)">
+        <input type="number" placeholder="Reps"
+          value="${set.reps || ""}"
+          oninput="updateSet(${logIndex},${setIndex},'reps',this.value)">
+      </div>
+    `;
+  });
+}
+
+function addSet(logIndex) {
+  activeSession.logs[logIndex].sets.push({ weight:"", reps:"" });
+  renderActiveSession();
+}
+
+function updateSet(logIndex,setIndex,key,value){
+  activeSession.logs[logIndex].sets[setIndex][key]=value;
+}
+
+function finishWorkout() {
+  sessions.push(activeSession);
   save();
-  renderHome();
+  activeSession = null;
+  alert("Workout saved.");
+  renderStart();
 }
 
-renderHome();
+/* ================= PROGRESS ================= */
 
+function renderProgress() {
+  const container = document.getElementById('progress');
+  container.innerHTML = `
+    <div class="card">
+      Total Sessions: ${sessions.length}
+    </div>
+  `;
+}
+
+showTab('exercises');
 </script>
+
 </body>
 </html>
