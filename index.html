@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker Pro</title>
+<title>Workout Tracker · Share & History</title>
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -10,7 +10,7 @@ body {
   background: #111;
   color: white;
 }
-.container { padding: 20px; }
+.container { padding: 20px; max-width: 600px; margin: 0 auto; }
 button {
   padding: 10px;
   margin: 5px 0;
@@ -19,300 +19,538 @@ button {
   border: none;
   border-radius: 8px;
   width: 100%;
+  font-weight: 500;
+  cursor: pointer;
 }
-input {
+button:hover { background: #3a3a3a; }
+input, select {
   padding: 8px;
   margin: 4px 0;
   border-radius: 6px;
   border: none;
   width: 100%;
+  background: #222;
+  color: white;
 }
-.card {
+.exercise-card {
   background: #1c1c1c;
-  padding: 10px;
+  padding: 12px;
   margin: 8px 0;
   border-radius: 10px;
+  border-left: 3px solid #4caf50;
 }
 .timer {
-  font-size: 28px;
+  font-size: 32px;
   text-align: center;
-  margin: 10px 0;
+  margin: 15px 0;
+  background: #000;
+  padding: 10px;
+  border-radius: 20px;
+  font-weight: 600;
 }
 .small-btn {
   width: auto;
   padding: 5px 10px;
   font-size: 12px;
+  margin: 2px;
 }
-h3 { margin-bottom: 5px; }
+.flex-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.history-item, .template-item {
+  background: #1c1c1c;
+  padding: 12px;
+  margin: 10px 0;
+  border-radius: 10px;
+}
+.version-badge {
+  background: #333;
+  padding: 4px 8px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: #aaa;
+  text-align: center;
+}
 </style>
 </head>
 <body>
 <div class="container" id="app"></div>
 
 <script>
+(function() {
+  // ----- VERSION CONTROL: force cache refresh on new code -----
+  const APP_VERSION = '2.1.0'; // increment when pushing updates
+  let currentVersion = localStorage.getItem('workoutApp_version');
+  if (currentVersion !== APP_VERSION) {
+    // Clear old structure if version mismatch (safe upgrade)
+    localStorage.removeItem('workoutApp');
+    localStorage.setItem('workoutApp_version', APP_VERSION);
+  }
 
-// ---------- DEFAULT TEMPLATES ----------
+  // ----- DEFAULT TEMPLATES (enriched with IDs for sharing) -----
+  let defaultTemplates = [
+    {
+      id: 'upper1-' + Date.now() + '-1',
+      name: "Upper 1 – Pull Dominant",
+      rest: 120,
+      repRange: "8-15",
+      exercises: [
+        { name: "Vertical Pull (Wide Grip)", sets: 2 },
+        { name: "Horizontal Row", sets: 2 },
+        { name: "Vertical Pull (Close / Neutral)", sets: 2 },
+        { name: "Incline Press (60°)", sets: 2 },
+        { name: "Lateral Raises", sets: 2 },
+        { name: "Optional Arms", sets: 2 }
+      ]
+    },
+    {
+      id: 'lower1-' + Date.now() + '-2',
+      name: "Lower 1 – Quad Emphasis",
+      rest: 120,
+      repRange: "8-15",
+      exercises: [
+        { name: "Quad Dominant Squat", sets: 3 },
+        { name: "Bulgarian Split Squats (Shorter Stride)", sets: 3 },
+        { name: "Romanian Deadlift", sets: 3 },
+        { name: "Hip Thrust", sets: 3 }
+      ]
+    },
+    {
+      id: 'upper2-' + Date.now() + '-3',
+      name: "Upper 2 – Push Dominant",
+      rest: 120,
+      repRange: "8-15",
+      exercises: [
+        { name: "Overhead Press", sets: 2 },
+        { name: "Incline Press (60°)", sets: 2 },
+        { name: "Lateral Raises", sets: 2 },
+        { name: "Horizontal Row (Different Variation)", sets: 2 },
+        { name: "Vertical Pull (Neutral or Supinated)", sets: 2 },
+        { name: "Optional Arms", sets: 2 }
+      ]
+    },
+    {
+      id: 'lower2-' + Date.now() + '-4',
+      name: "Lower 2 – Glute / Hinge Emphasis",
+      rest: 120,
+      repRange: "8-15",
+      exercises: [
+        { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
+        { name: "Hip Thrust (Heavier Than Lower 1)", sets: 3 },
+        { name: "Glute Dominant Squat", sets: 3 },
+        { name: "Bulgarian Split Squats (Longer Stride)", sets: 3 }
+      ]
+    }
+  ];
 
-const defaultTemplates = [
-{
-name:"Upper 1 – Pull Dominant",
-rest:120,
-exercises:[
-{name:"Vertical Pull (Wide Grip)",sets:2},
-{name:"Horizontal Row",sets:2},
-{name:"Vertical Pull (Close / Neutral)",sets:2},
-{name:"Incline Press (60°)",sets:2},
-{name:"Lateral Raises",sets:2},
-{name:"Optional Arms",sets:2}
-]
-},
-{
-name:"Lower 1 – Quad Emphasis",
-rest:120,
-exercises:[
-{name:"Quad Dominant Squat",sets:3},
-{name:"Bulgarian Split Squats (Shorter Stride)",sets:3},
-{name:"Romanian Deadlift",sets:3},
-{name:"Hip Thrust",sets:3}
-]
-},
-{
-name:"Upper 2 – Push Dominant",
-rest:120,
-exercises:[
-{name:"Overhead Press",sets:2},
-{name:"Incline Press (60°)",sets:2},
-{name:"Lateral Raises",sets:2},
-{name:"Horizontal Row (Different Variation)",sets:2},
-{name:"Vertical Pull (Neutral or Supinated)",sets:2},
-{name:"Optional Arms",sets:2}
-]
-},
-{
-name:"Lower 2 – Glute / Hinge Emphasis",
-rest:120,
-exercises:[
-{name:"Romanian Deadlift (Primary Hinge)",sets:3},
-{name:"Hip Thrust (Heavier Than Lower 1)",sets:3},
-{name:"Glute Dominant Squat",sets:3},
-{name:"Bulgarian Split Squats (Longer Stride)",sets:3}
-]
-}
-];
+  // ----- DATA STRUCTURE (templates + workoutHistory) -----
+  let data = JSON.parse(localStorage.getItem("workoutApp")) || {
+    templates: defaultTemplates,
+    activeWorkout: null,
+    history: []               // NEW: store completed workouts
+  };
 
-// ---------- LOAD DATA SAFELY ----------
+  // ensure every template has an id (for old local data)
+  data.templates = data.templates.map(t => ({
+    id: t.id || 'tpl-' + Date.now() + '-' + Math.random().toString(36),
+    ...t
+  }));
 
-let stored = JSON.parse(localStorage.getItem("workoutPro"));
+  function save() {
+    localStorage.setItem("workoutApp", JSON.stringify(data));
+  }
 
-let data = stored && stored.templates?.length
-? stored
-: {
-templates: defaultTemplates,
-workouts: [],
-activeWorkout:null
-};
+  // ----- SHARE / IMPORT via URL hash -----
+  function parseShareLink() {
+    const hash = window.location.hash.substring(1); // remove '#'
+    if (!hash) return;
+    try {
+      const decoded = atob(hash);
+      const imported = JSON.parse(decoded);
+      if (imported && Array.isArray(imported)) {
+        // give each imported template a fresh id to avoid conflicts
+        imported.forEach(t => {
+          t.id = 'shared-' + Date.now() + '-' + Math.random().toString(36).substring(2,8);
+        });
+        // append to existing templates (user can delete later)
+        data.templates = [...data.templates, ...imported];
+        save();
+        alert('Imported ' + imported.length + ' template(s) from link!');
+        window.location.hash = ''; // clear hash
+      }
+    } catch (e) {
+      console.warn('Invalid share link', e);
+    }
+  }
+  parseShareLink(); // run on load
 
-function save(){
-localStorage.setItem("workoutPro",JSON.stringify(data));
-}
+  // generate shareable URL for selected templates
+  function getShareUrl(templateIds) {
+    const selected = data.templates.filter(t => templateIds.includes(t.id));
+    if (!selected.length) return '';
+    // strip logs/history noise, keep only structure
+    const clean = selected.map(({ id, name, rest, repRange, exercises }) => ({
+      id, name, rest, repRange, exercises
+    }));
+    const encoded = btoa(JSON.stringify(clean));
+    return window.location.origin + window.location.pathname + '#' + encoded;
+  }
 
-// ---------- HOME ----------
+  // ----- RENDER HOME (templates + history summary) -----
+  function renderHome() {
+    const app = document.getElementById("app");
+    app.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>📋 Templates</h2>
+        <span class="version-badge">v${APP_VERSION}</span>
+      </div>
+      <button onclick="createTemplate()">➕ Create Template</button>
+      <button onclick="exportPrompt()" style="background:#1e3a5f;">🔗 Share / Import</button>
+      <div id="templateList">
+        ${data.templates.map((t,i)=>`
+          <div class="template-item">
+            <div style="display:flex; justify-content:space-between;">
+              <b>${t.name}</b> <span style="color:#888;">${t.exercises.length} ex</span>
+            </div>
+            <div class="flex-row" style="margin-top:8px;">
+              <button class="small-btn" onclick="startWorkout('${t.id}')">▶️ Start</button>
+              <button class="small-btn" onclick="editTemplate('${t.id}')">✏️ Edit</button>
+              <button class="small-btn" onclick="deleteTemplate('${t.id}')">🗑️</button>
+              <button class="small-btn" onclick="selectForShare('${t.id}')" style="background:#3a2a2a;">🔗 Select</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <h3 style="margin-top:24px;">📜 History (last 5)</h3>
+      <div id="historyList">
+        ${data.history.slice(-5).reverse().map(s => `
+          <div class="history-item">
+            <b>${s.templateName}</b> <span style="color:#aaa;">${new Date(s.date).toLocaleDateString()}</span>
+            <details>
+              <summary>View details</summary>
+              ${s.logs.map(l => `
+                <div style="margin:6px 0; background:#2a2a2a; padding:6px; border-radius:6px;">
+                  <b>${l.name}</b><br>
+                  ${l.sets.map((set, idx) => `
+                    Set ${idx+1}: ${set.weight || '?'} kg × ${set.reps || '?'} reps
+                  `).join('<br>')}
+                </div>
+              `).join('')}
+            </details>
+          </div>
+        `).join('')}
+        ${data.history.length === 0 ? '<p style="color:#666;">No past workouts yet.</p>' : ''}
+      </div>
+    `;
+  }
 
-function renderHome(){
-const app=document.getElementById("app");
-app.innerHTML=`
-<h2>Workout Templates</h2>
-<button onclick="createTemplate()">+ Create Template</button>
-<button onclick="viewHistory()">📊 View Workout History</button>
-${data.templates.map((t,i)=>`
-<div class="card">
-<b>${t.name}</b><br>
-<button onclick="startWorkout(${i})">Start Workout</button>
-<button onclick="editTemplate(${i})">Edit</button>
-</div>
-`).join("")}
-`;
-}
+  // ----- SHARE SELECTION UI -----
+  let selectedShareIds = [];
+  window.selectForShare = (id) => {
+    if (selectedShareIds.includes(id)) {
+      selectedShareIds = selectedShareIds.filter(sid => sid !== id);
+    } else {
+      selectedShareIds.push(id);
+    }
+    // visual feedback
+    renderHome();
+    // add a small floating bar
+    if (selectedShareIds.length > 0) {
+      let bar = document.getElementById('shareBar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'shareBar';
+        bar.style.position = 'sticky';
+        bar.style.bottom = '10px';
+        bar.style.background = '#2c3e50';
+        bar.style.padding = '10px';
+        bar.style.borderRadius = '30px';
+        bar.style.marginTop = '10px';
+        bar.style.display = 'flex';
+        bar.style.gap = '8px';
+        document.getElementById('app').appendChild(bar);
+      }
+      bar.innerHTML = `
+        <span>${selectedShareIds.length} selected</span>
+        <button class="small-btn" onclick="copyShareLink()">📋 Copy link</button>
+        <button class="small-btn" onclick="selectedShareIds=[]; renderHome();">✖ Clear</button>
+      `;
+    } else {
+      document.getElementById('shareBar')?.remove();
+    }
+  };
 
-// ---------- TEMPLATE ----------
+  window.copyShareLink = () => {
+    const url = getShareUrl(selectedShareIds);
+    if (!url) return alert('No templates selected');
+    navigator.clipboard.writeText(url).then(() => {
+      alert('Share link copied! Anyone with this link can import.');
+      selectedShareIds = [];
+      renderHome();
+    });
+  };
 
-function createTemplate(){
-const name=prompt("Template Name:");
-if(!name)return;
-data.templates.push({name,rest:120,exercises:[]});
-save(); renderHome();
-}
+  window.exportPrompt = () => {
+    const importCode = prompt('Paste a share link or JSON to import templates:');
+    if (!importCode) return;
+    try {
+      let parsed;
+      if (importCode.startsWith('http')) {
+        const hash = importCode.split('#')[1];
+        if (!hash) throw new Error('No hash');
+        parsed = JSON.parse(atob(hash));
+      } else {
+        // direct json attempt
+        parsed = JSON.parse(importCode);
+      }
+      if (Array.isArray(parsed)) {
+        parsed.forEach(t => {
+          t.id = 'imported-' + Date.now() + '-' + Math.random().toString(36);
+          data.templates.push(t);
+        });
+        save();
+        renderHome();
+        alert('Imported successfully.');
+      } else throw new Error('Invalid format');
+    } catch (e) {
+      alert('Could not import. Make sure it is a valid share link or JSON array.');
+    }
+  };
 
-function editTemplate(i){
-const t=data.templates[i];
-const app=document.getElementById("app");
-app.innerHTML=`
-<button onclick="renderHome()">← Back</button>
-<h2>${t.name}</h2>
-<label>Rest (seconds)</label>
-<input value="${t.rest}" onchange="t.rest=this.value;save()">
-<h3>Exercises</h3>
-${t.exercises.map((e,ei)=>`
-<div class="card">
-<input value="${e.name}" onchange="updateExerciseName(${i},${ei},this.value)">
-<label>Sets</label>
-<input value="${e.sets}" onchange="updateExerciseSets(${i},${ei},this.value)">
-<button class="small-btn" onclick="moveUp(${i},${ei})">↑</button>
-<button class="small-btn" onclick="moveDown(${i},${ei})">↓</button>
-<button class="small-btn" onclick="deleteExercise(${i},${ei})">Delete</button>
-</div>
-`).join("")}
-<button onclick="addExercise(${i})">+ Add Exercise</button>
-`;
-}
+  // ----- TEMPLATE CRUD (using ids) -----
+  window.createTemplate = () => {
+    const name = prompt("Template Name:");
+    if(!name) return;
+    data.templates.push({
+      id: 'manual-' + Date.now() + '-' + Math.random().toString(36),
+      name,
+      rest: 120,
+      repRange: "8-15",
+      exercises: []
+    });
+    save();
+    renderHome();
+  };
 
-function updateExerciseName(i,ei,val){
-data.templates[i].exercises[ei].name=val;
-save();
-}
-function updateExerciseSets(i,ei,val){
-data.templates[i].exercises[ei].sets=parseInt(val);
-save();
-}
-function addExercise(i){
-const name=prompt("Exercise Name:");
-if(!name)return;
-data.templates[i].exercises.push({name,sets:2});
-save(); editTemplate(i);
-}
-function deleteExercise(i,ei){
-data.templates[i].exercises.splice(ei,1);
-save(); editTemplate(i);
-}
-function moveUp(i,ei){
-if(ei===0)return;
-let ex=data.templates[i].exercises;
-[ex[ei-1],ex[ei]]=[ex[ei],ex[ei-1]];
-save(); editTemplate(i);
-}
-function moveDown(i,ei){
-let ex=data.templates[i].exercises;
-if(ei===ex.length-1)return;
-[ex[ei+1],ex[ei]]=[ex[ei],ex[ei+1]];
-save(); editTemplate(i);
-}
+  window.deleteTemplate = (id) => {
+    if(confirm("Delete template?")){
+      data.templates = data.templates.filter(t => t.id !== id);
+      save();
+      renderHome();
+    }
+  };
 
-// ---------- WORKOUT ----------
+  function findTemplateIndex(id) {
+    return data.templates.findIndex(t => t.id === id);
+  }
 
-function startWorkout(i){
-const template=JSON.parse(JSON.stringify(data.templates[i]));
-template.current=0;
-template.logs=template.exercises.map(e=>({
-name:e.name,
-sets:Array.from({length:e.sets},()=>({weight:"",reps:""}))
-}));
-template.startTime=new Date();
-data.activeWorkout=template;
-save(); renderWorkout();
-}
+  window.editTemplate = (id) => {
+    const i = findTemplateIndex(id);
+    if (i === -1) return renderHome();
+    const template = data.templates[i];
+    const app = document.getElementById("app");
 
-let timerInt=null;
+    app.innerHTML = `
+      <button onclick="renderHome()">← Back</button>
+      <h2>${template.name}</h2>
+      <label>Rest (seconds)</label>
+      <input value="${template.rest}" onchange="updateRest('${id}',this.value)">
+      <h3>Exercises</h3>
+      ${template.exercises.map((e,ei)=>`
+        <div class="exercise-card">
+          ${e.name} (${e.sets} sets)
+          <div class="flex-row">
+            <button class="small-btn" onclick="moveUp('${id}',${ei})">↑</button>
+            <button class="small-btn" onclick="moveDown('${id}',${ei})">↓</button>
+            <button class="small-btn" onclick="deleteExercise('${id}',${ei})">Delete</button>
+          </div>
+        </div>
+      `).join("")}
+      <button onclick="addExercise('${id}')">+ Add Exercise</button>
+    `;
+  };
 
-function renderWorkout(){
-const w=data.activeWorkout;
-if(!w)return renderHome();
-const ex=w.logs[w.current];
-const app=document.getElementById("app");
+  window.updateRest = (id,val) => {
+    const i = findTemplateIndex(id);
+    if (i!==-1) data.templates[i].rest = parseInt(val);
+    save();
+  };
 
-app.innerHTML=`
-<button onclick="finishWorkout()">Finish Workout</button>
-<h2>${ex.name}</h2>
-${ex.sets.map((s,si)=>`
-<div class="card">
-Set ${si+1}
-<input placeholder="Weight" value="${s.weight}"
-onchange="updateSet(${si},'weight',this.value)">
-<input placeholder="Reps" value="${s.reps}"
-onchange="updateSet(${si},'reps',this.value)">
-<button onclick="completeSet(${si})">Complete</button>
-</div>
-`).join("")}
-<div class="timer" id="timer"></div>
-<button onclick="prevExercise()">← Previous</button>
-<button onclick="nextExercise()">Next →</button>
-`;
-}
+  window.addExercise = (id) => {
+    const i = findTemplateIndex(id);
+    if (i===-1) return;
+    const name = prompt("Exercise name:");
+    const sets = prompt("Number of sets:", 2);
+    if(!name) return;
+    data.templates[i].exercises.push({
+      name,
+      sets: parseInt(sets)
+    });
+    save();
+    editTemplate(id);
+  };
 
-function updateSet(si,key,val){
-data.activeWorkout.logs[data.activeWorkout.current].sets[si][key]=val;
-save();
-}
+  window.deleteExercise = (id, ei) => {
+    const i = findTemplateIndex(id);
+    data.templates[i].exercises.splice(ei,1);
+    save();
+    editTemplate(id);
+  };
 
-function completeSet(si){
-let set=data.activeWorkout.logs[data.activeWorkout.current].sets[si];
-if(parseInt(set.reps)>15){
-alert("More than 15 reps. Increase weight.");
-return;
-}
-startTimer(data.activeWorkout.rest||120);
-}
+  window.moveUp = (id, ei) => {
+    const i = findTemplateIndex(id);
+    if (i===-1) return;
+    if(ei===0) return;
+    const ex = data.templates[i].exercises;
+    [ex[ei-1],ex[ei]] = [ex[ei],ex[ei-1]];
+    save();
+    editTemplate(id);
+  };
 
-function startTimer(sec){
-clearInterval(timerInt);
-let remain=sec;
-const t=document.getElementById("timer");
-t.innerText=format(remain);
-timerInt=setInterval(()=>{
-remain--;
-t.innerText=format(remain);
-if(remain<=0){
-clearInterval(timerInt);
-alert("Rest finished");
-}
-},1000);
-}
-function format(s){
-let m=Math.floor(s/60);
-let sec=s%60;
-return m+":"+(sec<10?"0":"")+sec;
-}
+  window.moveDown = (id, ei) => {
+    const i = findTemplateIndex(id);
+    if (i===-1) return;
+    const ex = data.templates[i].exercises;
+    if(ei===ex.length-1) return;
+    [ex[ei+1],ex[ei]] = [ex[ei],ex[ei+1]];
+    save();
+    editTemplate(id);
+  };
 
-function nextExercise(){
-if(data.activeWorkout.current<
-data.activeWorkout.logs.length-1){
-data.activeWorkout.current++;
-save(); renderWorkout();
-}
-}
-function prevExercise(){
-if(data.activeWorkout.current>0){
-data.activeWorkout.current--;
-save(); renderWorkout();
-}
-}
+  // ----- WORKOUT START (store template copy with timestamp) -----
+  window.startWorkout = (id) => {
+    const i = findTemplateIndex(id);
+    if (i===-1) return;
+    const template = JSON.parse(JSON.stringify(data.templates[i]));
+    template.currentExercise = 0;
+    template.logs = template.exercises.map(e=>({
+      name: e.name,
+      sets: Array.from({length: e.sets}, () => ({weight:"",reps:""}))
+    }));
+    template.startedAt = new Date().toISOString();
+    template.templateId = id; // link back
+    data.activeWorkout = template;
+    save();
+    renderWorkout();
+  };
 
-function finishWorkout(){
-data.activeWorkout.endTime=new Date();
-data.workouts.push(data.activeWorkout);
-data.activeWorkout=null;
-save();
-alert("Workout Saved!");
-renderHome();
-}
+  let timerInterval=null;
 
-// ---------- HISTORY ----------
+  function startTimer(seconds){
+    let remaining = seconds;
+    const timerDiv = document.getElementById("timer");
+    if (!timerDiv) return;
+    clearInterval(timerInterval);
+    timerDiv.innerText = formatTime(remaining);
+    timerInterval = setInterval(()=>{
+      remaining--;
+      if (timerDiv) timerDiv.innerText = formatTime(remaining);
+      if(remaining<=0){
+        clearInterval(timerInterval);
+        if (timerDiv) timerDiv.innerText = "0:00";
+        alert("Rest over!");
+      }
+    },1000);
+  }
 
-function viewHistory(){
-const app=document.getElementById("app");
-app.innerHTML=`
-<button onclick="renderHome()">← Back</button>
-<h2>Workout History</h2>
-${data.workouts.map((w,i)=>`
-<div class="card">
-${w.name||"Workout"}<br>
-${new Date(w.startTime).toLocaleString()}
-</div>
-`).join("")}
-`;
-}
+  function formatTime(s){
+    const m = Math.floor(s/60);
+    const sec = s%60;
+    return `${m}:${sec<10?"0":""}${sec}`;
+  }
 
-renderHome();
+  function renderWorkout(){
+    const w = data.activeWorkout;
+    if(!w) return renderHome();
 
+    const exercise = w.logs[w.currentExercise];
+    const app = document.getElementById("app");
+
+    app.innerHTML = `
+      <button onclick="endWorkout()">🏁 End Workout</button>
+      <h2>${exercise.name}</h2>
+      ${exercise.sets.map((set,si)=>`
+        <div class="exercise-card">
+          <b>Set ${si+1}</b><br>
+          <input placeholder="Weight (kg)" value="${set.weight || ''}" 
+            onchange="updateSet(${si},'weight',this.value)">
+          <input placeholder="Reps" value="${set.reps || ''}" 
+            onchange="updateSet(${si},'reps',this.value)">
+          <button class="small-btn" style="background:#2e7d32;" onclick="completeSet(${si})">✅ Log & Rest</button>
+        </div>
+      `).join("")}
+      <div class="timer" id="timer">${formatTime(w.rest)}</div>
+      <button onclick="nextExercise()">⏩ Next Exercise</button>
+    `;
+  }
+
+  window.updateSet = (si,key,val) => {
+    const w = data.activeWorkout;
+    w.logs[w.currentExercise].sets[si][key]=val;
+    save();
+  };
+
+  window.completeSet = (si) => {
+    const w = data.activeWorkout;
+    const set = w.logs[w.currentExercise].sets[si];
+    // optional rep check
+    if(parseInt(set.reps) > 15){
+      alert("More than 15 reps. Consider increasing weight. Logged anyway.");
+    }
+    startTimer(w.rest);
+  };
+
+  window.nextExercise = () => {
+    const w = data.activeWorkout;
+    if(w.currentExercise < w.logs.length-1){
+      w.currentExercise++;
+      save();
+      renderWorkout();
+    } else {
+      // workout complete -> save to history
+      const historyEntry = {
+        date: new Date().toISOString(),
+        templateName: w.name,
+        logs: w.logs,
+        id: w.templateId
+      };
+      data.history.push(historyEntry);
+      data.activeWorkout = null;
+      save();
+      alert("Workout complete! Saved to history.");
+      renderHome();
+    }
+  };
+
+  window.endWorkout = () => {
+    if (data.activeWorkout) {
+      if (confirm('Save current progress to history?')) {
+        const w = data.activeWorkout;
+        data.history.push({
+          date: new Date().toISOString(),
+          templateName: w.name,
+          logs: w.logs,
+          id: w.templateId
+        });
+      }
+    }
+    data.activeWorkout = null;
+    clearInterval(timerInterval);
+    save();
+    renderHome();
+  };
+
+  // expose functions to global for onclick
+  window.renderHome = renderHome;
+  window.save = save;
+  window.data = data; // debug
+
+  // initial render
+  renderHome();
+})();
 </script>
 </body>
 </html>
