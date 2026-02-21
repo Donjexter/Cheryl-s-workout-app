@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · Share & History</title>
+<title>Workout Tracker · Full History & Drag</title>
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -23,7 +23,13 @@ button {
   cursor: pointer;
 }
 button:hover { background: #3a3a3a; }
-input, select {
+button.small-btn {
+  width: auto;
+  padding: 5px 10px;
+  font-size: 12px;
+  margin: 2px;
+}
+input, select, textarea {
   padding: 8px;
   margin: 4px 0;
   border-radius: 6px;
@@ -38,6 +44,19 @@ input, select {
   margin: 8px 0;
   border-radius: 10px;
   border-left: 3px solid #4caf50;
+  cursor: grab;
+  transition: background 0.2s;
+}
+.exercise-card.dragging {
+  opacity: 0.5;
+  background: #333;
+  cursor: grabbing;
+}
+.exercise-card .drag-handle {
+  font-size: 20px;
+  margin-right: 8px;
+  color: #888;
+  user-select: none;
 }
 .timer {
   font-size: 32px;
@@ -47,12 +66,6 @@ input, select {
   padding: 10px;
   border-radius: 20px;
   font-weight: 600;
-}
-.small-btn {
-  width: auto;
-  padding: 5px 10px;
-  font-size: 12px;
-  margin: 2px;
 }
 .flex-row {
   display: flex;
@@ -66,6 +79,11 @@ input, select {
   margin: 10px 0;
   border-radius: 10px;
 }
+.history-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
 .version-badge {
   background: #333;
   padding: 4px 8px;
@@ -74,6 +92,12 @@ input, select {
   color: #aaa;
   text-align: center;
 }
+.edit-exercise-form {
+  background: #2a2a2a;
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
 </style>
 </head>
 <body>
@@ -81,16 +105,15 @@ input, select {
 
 <script>
 (function() {
-  // ----- VERSION CONTROL: force cache refresh on new code -----
-  const APP_VERSION = '2.1.0'; // increment when pushing updates
-  let currentVersion = localStorage.getItem('workoutApp_version');
-  if (currentVersion !== APP_VERSION) {
-    // Clear old structure if version mismatch (safe upgrade)
+  const APP_VERSION = '2.2.0'; // drag & full history
+
+  // Clear storage on version mismatch
+  if (localStorage.getItem('workoutApp_version') !== APP_VERSION) {
     localStorage.removeItem('workoutApp');
     localStorage.setItem('workoutApp_version', APP_VERSION);
   }
 
-  // ----- DEFAULT TEMPLATES (enriched with IDs for sharing) -----
+  // ----- DEFAULT TEMPLATES -----
   let defaultTemplates = [
     {
       id: 'upper1-' + Date.now() + '-1',
@@ -146,14 +169,13 @@ input, select {
     }
   ];
 
-  // ----- DATA STRUCTURE (templates + workoutHistory) -----
   let data = JSON.parse(localStorage.getItem("workoutApp")) || {
     templates: defaultTemplates,
     activeWorkout: null,
-    history: []               // NEW: store completed workouts
+    history: []
   };
 
-  // ensure every template has an id (for old local data)
+  // Ensure IDs
   data.templates = data.templates.map(t => ({
     id: t.id || 'tpl-' + Date.now() + '-' + Math.random().toString(36),
     ...t
@@ -163,43 +185,27 @@ input, select {
     localStorage.setItem("workoutApp", JSON.stringify(data));
   }
 
-  // ----- SHARE / IMPORT via URL hash -----
+  // ----- SHARE / IMPORT (unchanged, but keep) -----
   function parseShareLink() {
-    const hash = window.location.hash.substring(1); // remove '#'
+    const hash = window.location.hash.substring(1);
     if (!hash) return;
     try {
       const decoded = atob(hash);
       const imported = JSON.parse(decoded);
       if (imported && Array.isArray(imported)) {
-        // give each imported template a fresh id to avoid conflicts
         imported.forEach(t => {
           t.id = 'shared-' + Date.now() + '-' + Math.random().toString(36).substring(2,8);
         });
-        // append to existing templates (user can delete later)
         data.templates = [...data.templates, ...imported];
         save();
         alert('Imported ' + imported.length + ' template(s) from link!');
-        window.location.hash = ''; // clear hash
+        window.location.hash = '';
       }
-    } catch (e) {
-      console.warn('Invalid share link', e);
-    }
+    } catch (e) {}
   }
-  parseShareLink(); // run on load
+  parseShareLink();
 
-  // generate shareable URL for selected templates
-  function getShareUrl(templateIds) {
-    const selected = data.templates.filter(t => templateIds.includes(t.id));
-    if (!selected.length) return '';
-    // strip logs/history noise, keep only structure
-    const clean = selected.map(({ id, name, rest, repRange, exercises }) => ({
-      id, name, rest, repRange, exercises
-    }));
-    const encoded = btoa(JSON.stringify(clean));
-    return window.location.origin + window.location.pathname + '#' + encoded;
-  }
-
-  // ----- RENDER HOME (templates + history summary) -----
+  // ----- RENDER HOME (full history with delete) -----
   function renderHome() {
     const app = document.getElementById("app");
     app.innerHTML = `
@@ -224,40 +230,39 @@ input, select {
           </div>
         `).join("")}
       </div>
-      <h3 style="margin-top:24px;">📜 History (last 5)</h3>
+
+      <h3 style="margin-top:24px;">📜 Full History (${data.history.length})</h3>
+      <button class="small-btn" onclick="clearAllHistory()" style="background:#5f1f1f;">🗑️ Clear All History</button>
       <div id="historyList">
-        ${data.history.slice(-5).reverse().map(s => `
+        ${data.history.slice().reverse().map((s, idx) => {
+          const realIndex = data.history.length - 1 - idx; // original index for deletion
+          return `
           <div class="history-item">
-            <b>${s.templateName}</b> <span style="color:#aaa;">${new Date(s.date).toLocaleDateString()}</span>
+            <div style="display:flex; justify-content:space-between;">
+              <b>${s.templateName}</b>
+              <span style="color:#aaa;">${new Date(s.date).toLocaleString()}</span>
+            </div>
             <details>
               <summary>View details</summary>
               ${s.logs.map(l => `
                 <div style="margin:6px 0; background:#2a2a2a; padding:6px; border-radius:6px;">
                   <b>${l.name}</b><br>
-                  ${l.sets.map((set, idx) => `
-                    Set ${idx+1}: ${set.weight || '?'} kg × ${set.reps || '?'} reps
+                  ${l.sets.map((set, setIdx) => `
+                    Set ${setIdx+1}: ${set.weight || '?'} kg × ${set.reps || '?'} reps
                   `).join('<br>')}
                 </div>
               `).join('')}
             </details>
+            <div class="history-actions">
+              <button class="small-btn" onclick="deleteHistoryEntry(${realIndex})" style="background:#7a2a2a;">Delete</button>
+            </div>
           </div>
-        `).join('')}
+        `}).join('')}
         ${data.history.length === 0 ? '<p style="color:#666;">No past workouts yet.</p>' : ''}
       </div>
     `;
-  }
 
-  // ----- SHARE SELECTION UI -----
-  let selectedShareIds = [];
-  window.selectForShare = (id) => {
-    if (selectedShareIds.includes(id)) {
-      selectedShareIds = selectedShareIds.filter(sid => sid !== id);
-    } else {
-      selectedShareIds.push(id);
-    }
-    // visual feedback
-    renderHome();
-    // add a small floating bar
+    // re-attach share selection bar if needed
     if (selectedShareIds.length > 0) {
       let bar = document.getElementById('shareBar');
       if (!bar) {
@@ -278,16 +283,47 @@ input, select {
         <button class="small-btn" onclick="copyShareLink()">📋 Copy link</button>
         <button class="small-btn" onclick="selectedShareIds=[]; renderHome();">✖ Clear</button>
       `;
-    } else {
-      document.getElementById('shareBar')?.remove();
+    }
+  }
+
+  // ----- HISTORY MANAGEMENT -----
+  window.deleteHistoryEntry = (index) => {
+    if (confirm('Delete this history entry?')) {
+      data.history.splice(index, 1);
+      save();
+      renderHome();
     }
   };
 
+  window.clearAllHistory = () => {
+    if (confirm('Delete ALL history? This cannot be undone.')) {
+      data.history = [];
+      save();
+      renderHome();
+    }
+  };
+
+  // ----- SHARE SELECTION (unchanged) -----
+  let selectedShareIds = [];
+  window.selectForShare = (id) => {
+    if (selectedShareIds.includes(id)) {
+      selectedShareIds = selectedShareIds.filter(sid => sid !== id);
+    } else {
+      selectedShareIds.push(id);
+    }
+    renderHome();
+  };
+
   window.copyShareLink = () => {
-    const url = getShareUrl(selectedShareIds);
-    if (!url) return alert('No templates selected');
+    const selected = data.templates.filter(t => selectedShareIds.includes(t.id));
+    if (!selected.length) return alert('No templates selected');
+    const clean = selected.map(({ id, name, rest, repRange, exercises }) => ({
+      id, name, rest, repRange, exercises
+    }));
+    const encoded = btoa(JSON.stringify(clean));
+    const url = window.location.origin + window.location.pathname + '#' + encoded;
     navigator.clipboard.writeText(url).then(() => {
-      alert('Share link copied! Anyone with this link can import.');
+      alert('Share link copied!');
       selectedShareIds = [];
       renderHome();
     });
@@ -303,7 +339,6 @@ input, select {
         if (!hash) throw new Error('No hash');
         parsed = JSON.parse(atob(hash));
       } else {
-        // direct json attempt
         parsed = JSON.parse(importCode);
       }
       if (Array.isArray(parsed)) {
@@ -320,7 +355,7 @@ input, select {
     }
   };
 
-  // ----- TEMPLATE CRUD (using ids) -----
+  // ----- TEMPLATE CRUD -----
   window.createTemplate = () => {
     const name = prompt("Template Name:");
     if(!name) return;
@@ -347,6 +382,7 @@ input, select {
     return data.templates.findIndex(t => t.id === id);
   }
 
+  // ----- EDIT TEMPLATE (with inline exercise editing & drag) -----
   window.editTemplate = (id) => {
     const i = findTemplateIndex(id);
     if (i === -1) return renderHome();
@@ -358,19 +394,82 @@ input, select {
       <h2>${template.name}</h2>
       <label>Rest (seconds)</label>
       <input value="${template.rest}" onchange="updateRest('${id}',this.value)">
-      <h3>Exercises</h3>
-      ${template.exercises.map((e,ei)=>`
-        <div class="exercise-card">
-          ${e.name} (${e.sets} sets)
-          <div class="flex-row">
-            <button class="small-btn" onclick="moveUp('${id}',${ei})">↑</button>
-            <button class="small-btn" onclick="moveDown('${id}',${ei})">↓</button>
-            <button class="small-btn" onclick="deleteExercise('${id}',${ei})">Delete</button>
+      <h3>Exercises (drag handle ⋮⋮ to reorder)</h3>
+      <div id="exerciseList" style="margin: 10px 0;">
+        ${template.exercises.map((e, ei) => `
+          <div class="exercise-card" draggable="true" data-index="${ei}" data-id="${id}">
+            <div style="display:flex; align-items:center;">
+              <span class="drag-handle">⋮⋮</span>
+              <div style="flex:1;">
+                <b>${e.name}</b> (${e.sets} sets)
+              </div>
+            </div>
+            <div class="flex-row" style="margin-top:8px; justify-content:flex-end;">
+              <button class="small-btn" onclick="editExercise('${id}', ${ei})">✏️ Edit</button>
+              <button class="small-btn" onclick="deleteExercise('${id}', ${ei})">🗑️</button>
+            </div>
           </div>
-        </div>
-      `).join("")}
+        `).join("")}
+      </div>
       <button onclick="addExercise('${id}')">+ Add Exercise</button>
     `;
+
+    // drag & drop setup
+    const list = document.getElementById('exerciseList');
+    let draggedItem = null;
+
+    list.querySelectorAll('.exercise-card').forEach(card => {
+      card.addEventListener('dragstart', (e) => {
+        draggedItem = card;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        // store indices
+        e.dataTransfer.setData('text/plain', card.dataset.index);
+      });
+
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        draggedItem = null;
+      });
+
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      });
+
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (!draggedItem || draggedItem === card) return;
+
+        const fromIndex = parseInt(draggedItem.dataset.index);
+        const toIndex = parseInt(card.dataset.index);
+        const templateId = card.dataset.id; // same for all
+
+        const tIdx = findTemplateIndex(templateId);
+        if (tIdx === -1) return;
+        const exercises = data.templates[tIdx].exercises;
+        // reorder
+        const [moved] = exercises.splice(fromIndex, 1);
+        exercises.splice(toIndex, 0, moved);
+        save();
+        editTemplate(templateId); // re-render
+      });
+    });
+  };
+
+  // inline edit exercise
+  window.editExercise = (templateId, exerciseIdx) => {
+    const i = findTemplateIndex(templateId);
+    if (i === -1) return;
+    const exercise = data.templates[i].exercises[exerciseIdx];
+    const newName = prompt("Edit exercise name:", exercise.name);
+    if (newName === null) return;
+    const newSets = prompt("Number of sets:", exercise.sets);
+    if (newSets === null) return;
+    exercise.name = newName;
+    exercise.sets = parseInt(newSets) || exercise.sets;
+    save();
+    editTemplate(templateId);
   };
 
   window.updateRest = (id,val) => {
@@ -400,27 +499,7 @@ input, select {
     editTemplate(id);
   };
 
-  window.moveUp = (id, ei) => {
-    const i = findTemplateIndex(id);
-    if (i===-1) return;
-    if(ei===0) return;
-    const ex = data.templates[i].exercises;
-    [ex[ei-1],ex[ei]] = [ex[ei],ex[ei-1]];
-    save();
-    editTemplate(id);
-  };
-
-  window.moveDown = (id, ei) => {
-    const i = findTemplateIndex(id);
-    if (i===-1) return;
-    const ex = data.templates[i].exercises;
-    if(ei===ex.length-1) return;
-    [ex[ei+1],ex[ei]] = [ex[ei],ex[ei+1]];
-    save();
-    editTemplate(id);
-  };
-
-  // ----- WORKOUT START (store template copy with timestamp) -----
+  // ----- WORKOUT START (unchanged) -----
   window.startWorkout = (id) => {
     const i = findTemplateIndex(id);
     if (i===-1) return;
@@ -431,7 +510,7 @@ input, select {
       sets: Array.from({length: e.sets}, () => ({weight:"",reps:""}))
     }));
     template.startedAt = new Date().toISOString();
-    template.templateId = id; // link back
+    template.templateId = id;
     data.activeWorkout = template;
     save();
     renderWorkout();
@@ -496,7 +575,6 @@ input, select {
   window.completeSet = (si) => {
     const w = data.activeWorkout;
     const set = w.logs[w.currentExercise].sets[si];
-    // optional rep check
     if(parseInt(set.reps) > 15){
       alert("More than 15 reps. Consider increasing weight. Logged anyway.");
     }
@@ -510,7 +588,6 @@ input, select {
       save();
       renderWorkout();
     } else {
-      // workout complete -> save to history
       const historyEntry = {
         date: new Date().toISOString(),
         templateName: w.name,
@@ -543,12 +620,10 @@ input, select {
     renderHome();
   };
 
-  // expose functions to global for onclick
+  // expose globals
   window.renderHome = renderHome;
   window.save = save;
-  window.data = data; // debug
 
-  // initial render
   renderHome();
 })();
 </script>
