@@ -49,8 +49,60 @@ input {
 <div class="container" id="app"></div>
 
 <script>
+
+let defaultTemplates = [
+  {
+    name: "Upper 1 – Pull Dominant",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Vertical Pull (Wide Grip)", sets: 2 },
+      { name: "Horizontal Row", sets: 2 },
+      { name: "Vertical Pull (Close / Neutral)", sets: 2 },
+      { name: "Incline Press (60°)", sets: 2 },
+      { name: "Lateral Raises", sets: 2 },
+      { name: "Optional Arms", sets: 2 }
+    ]
+  },
+  {
+    name: "Lower 1 – Quad Emphasis",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Quad Dominant Squat", sets: 3 },
+      { name: "Bulgarian Split Squats (Shorter Stride)", sets: 3 },
+      { name: "Romanian Deadlift", sets: 3 },
+      { name: "Hip Thrust", sets: 3 }
+    ]
+  },
+  {
+    name: "Upper 2 – Push Dominant",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Overhead Press", sets: 2 },
+      { name: "Incline Press (60°)", sets: 2 },
+      { name: "Lateral Raises", sets: 2 },
+      { name: "Horizontal Row (Different Variation)", sets: 2 },
+      { name: "Vertical Pull (Neutral or Supinated)", sets: 2 },
+      { name: "Optional Arms", sets: 2 }
+    ]
+  },
+  {
+    name: "Lower 2 – Glute / Hinge Emphasis",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
+      { name: "Hip Thrust (Heavier Than Lower 1)", sets: 3 },
+      { name: "Glute Dominant Squat", sets: 3 },
+      { name: "Bulgarian Split Squats (Longer Stride)", sets: 3 }
+    ]
+  }
+];
+
 let data = JSON.parse(localStorage.getItem("workoutApp")) || {
-  templates: [],
+  templates: defaultTemplates,
   activeWorkout: null
 };
 
@@ -162,7 +214,7 @@ function startWorkout(i){
   template.currentExercise = 0;
   template.logs = template.exercises.map(e=>({
     name: e.name,
-    sets: Array(e.sets).fill({weight:"",reps:""})
+    sets: Array.from({length: e.sets}, () => ({weight:"",reps:""}))
   }));
   data.activeWorkout = template;
   save();
@@ -175,6 +227,7 @@ function startTimer(seconds){
   let remaining = seconds;
   const timerDiv = document.getElementById("timer");
   clearInterval(timerInterval);
+  timerDiv.innerText = formatTime(remaining);
   timerInterval = setInterval(()=>{
     remaining--;
     timerDiv.innerText = formatTime(remaining);
@@ -193,11 +246,10 @@ function formatTime(s){
 
 function renderWorkout(){
   const w = data.activeWorkout;
-  const app = document.getElementById("app");
-
   if(!w) return renderHome();
 
   const exercise = w.logs[w.currentExercise];
+  const app = document.getElementById("app");
 
   app.innerHTML = `
     <button onclick="endWorkout()">End Workout</button>
@@ -251,6 +303,7 @@ function endWorkout(){
 }
 
 renderHome();
+
 </script>
 </body>
 </html>
