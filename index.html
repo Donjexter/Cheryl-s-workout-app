@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · Full History & Drag</title>
+<title>Workout Tracker · Full History & Export</title>
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -83,6 +83,7 @@ input, select, textarea {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 .version-badge {
   background: #333;
@@ -98,6 +99,72 @@ input, select, textarea {
   border-radius: 8px;
   margin: 8px 0;
 }
+.stats-card {
+  background: #1e3a5f;
+  padding: 15px;
+  border-radius: 10px;
+  margin: 10px 0;
+  text-align: center;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 10px 0;
+}
+.stat-box {
+  background: #2c3e50;
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+}
+.stat-value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #4caf50;
+}
+.stat-label {
+  font-size: 12px;
+  color: #aaa;
+}
+.export-options {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: #1c1c1c;
+  padding: 20px;
+  border-radius: 12px;
+  max-width: 90%;
+  max-height: 80%;
+  overflow: auto;
+  position: relative;
+}
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  width: auto;
+}
 </style>
 </head>
 <body>
@@ -105,15 +172,15 @@ input, select, textarea {
 
 <script>
 (function() {
-  const APP_VERSION = '2.3.0'; // template merging & background timer
+  const APP_VERSION = '2.4.0'; // history export & backup
 
   // Clear storage on version mismatch
   if (localStorage.getItem('workoutApp_version') !== APP_VERSION) {
-    localStorage.removeItem('workoutApp');
+    // Don't clear on version upgrade - preserve history!
     localStorage.setItem('workoutApp_version', APP_VERSION);
   }
 
-  // ----- DEFAULT TEMPLATES (with unique IDs) -----
+  // ----- DEFAULT TEMPLATES -----
   let defaultTemplates = [
     {
       id: 'upper1-default',
@@ -222,7 +289,238 @@ input, select, textarea {
     localStorage.setItem("workoutApp", JSON.stringify(data));
   }
 
-  // ----- BACKGROUND TIMER USING SERVICE WORKER IDEA -----
+  // ----- EXPORT / IMPORT FUNCTIONS -----
+  window.exportAllData = () => {
+    const exportData = {
+      version: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      templates: data.templates,
+      history: data.history,
+      stats: calculateStats()
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `workout-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  window.exportHistory = (format = 'json') => {
+    if (data.history.length === 0) {
+      alert('No history to export');
+      return;
+    }
+
+    if (format === 'csv') {
+      // Convert to CSV
+      let csv = 'Date,Template,Exercise,Set,Weight (kg),Reps\n';
+      data.history.forEach(workout => {
+        const date = new Date(workout.date).toLocaleString();
+        workout.logs.forEach(exercise => {
+          exercise.sets.forEach((set, idx) => {
+            csv += `"${date}","${workout.templateName}","${exercise.name}",${idx + 1},${set.weight || ''},${set.reps || ''}\n`;
+          });
+        });
+      });
+      
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `workout-history-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      // Export as JSON
+      const historyData = {
+        version: APP_VERSION,
+        exportedAt: new Date().toISOString(),
+        history: data.history
+      };
+      
+      const blob = new Blob([JSON.stringify(historyData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `workout-history-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  window.importBackup = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+        try {
+          const imported = JSON.parse(event.target.result);
+          
+          if (confirm('Import backup? This will REPLACE all current data.')) {
+            if (imported.templates) data.templates = imported.templates;
+            if (imported.history) data.history = imported.history;
+            
+            // Ensure template IDs are unique
+            mergeTemplates();
+            save();
+            renderHome();
+            alert('Backup imported successfully!');
+          }
+        } catch (error) {
+          alert('Invalid backup file');
+        }
+      };
+      
+      reader.readAsText(file);
+    };
+    
+    input.click();
+  };
+
+  window.mergeBackup = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+        try {
+          const imported = JSON.parse(event.target.result);
+          
+          if (imported.templates) {
+            // Add new templates (avoid duplicates by name)
+            const existingNames = new Set(data.templates.map(t => t.name));
+            const newTemplates = imported.templates.filter(t => !existingNames.has(t.name));
+            data.templates = [...data.templates, ...newTemplates];
+          }
+          
+          if (imported.history) {
+            // Merge history (avoid exact duplicates by date)
+            const existingDates = new Set(data.history.map(h => h.date));
+            const newHistory = imported.history.filter(h => !existingDates.has(h.date));
+            data.history = [...data.history, ...newHistory];
+          }
+          
+          save();
+          renderHome();
+          alert('Backup merged successfully!');
+        } catch (error) {
+          alert('Invalid backup file');
+        }
+      };
+      
+      reader.readAsText(file);
+    };
+    
+    input.click();
+  };
+
+  // ----- STATISTICS -----
+  function calculateStats() {
+    const stats = {
+      totalWorkouts: data.history.length,
+      totalExercises: 0,
+      totalSets: 0,
+      totalWeight: 0,
+      favoriteExercise: '',
+      byTemplate: {}
+    };
+    
+    const exerciseCount = {};
+    
+    data.history.forEach(workout => {
+      stats.byTemplate[workout.templateName] = (stats.byTemplate[workout.templateName] || 0) + 1;
+      
+      workout.logs.forEach(exercise => {
+        stats.totalExercises++;
+        exerciseCount[exercise.name] = (exerciseCount[exercise.name] || 0) + 1;
+        
+        exercise.sets.forEach(set => {
+          stats.totalSets++;
+          if (set.weight) stats.totalWeight += parseFloat(set.weight) || 0;
+        });
+      });
+    });
+    
+    // Find favorite exercise
+    let maxCount = 0;
+    Object.entries(exerciseCount).forEach(([name, count]) => {
+      if (count > maxCount) {
+        maxCount = count;
+        stats.favoriteExercise = name;
+      }
+    });
+    
+    return stats;
+  }
+
+  // ----- SHOW STATS MODAL -----
+  window.showStats = () => {
+    const stats = calculateStats();
+    const app = document.getElementById("app");
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+        <h2>📊 Workout Statistics</h2>
+        
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-value">${stats.totalWorkouts}</div>
+            <div class="stat-label">Workouts</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">${stats.totalExercises}</div>
+            <div class="stat-label">Exercises</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">${stats.totalSets}</div>
+            <div class="stat-label">Sets</div>
+          </div>
+        </div>
+        
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-value">${Math.round(stats.totalWeight)} kg</div>
+            <div class="stat-label">Total Weight</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">${stats.favoriteExercise || 'N/A'}</div>
+            <div class="stat-label">Favorite</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">${Object.keys(stats.byTemplate).length}</div>
+            <div class="stat-label">Templates Used</div>
+          </div>
+        </div>
+        
+        <h3>Workouts by Template</h3>
+        ${Object.entries(stats.byTemplate).map(([name, count]) => `
+          <div style="display:flex; justify-content:space-between; margin:5px 0; padding:5px; background:#2a2a2a; border-radius:4px;">
+            <span>${name}</span>
+            <span style="color:#4caf50;">${count}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    
+    app.appendChild(modal);
+  };
+
+  // ----- BACKGROUND TIMER -----
   let timerInterval = null;
   let timerEndTime = null;
   let timerDuration = null;
@@ -233,26 +531,24 @@ input, select, textarea {
     
     clearInterval(timerInterval);
     
-    // Store end time for persistence
     timerDuration = seconds;
     timerEndTime = Date.now() + (seconds * 1000);
     
-    // Update timer immediately
     updateTimerDisplay();
     
-    // Set interval to update display
     timerInterval = setInterval(() => {
       updateTimerDisplay();
       
-      // Check if timer expired
       if (Date.now() >= timerEndTime) {
         clearInterval(timerInterval);
         if (document.getElementById("timer")) {
           document.getElementById("timer").innerText = "0:00";
         }
+        // Vibrate if supported (for mobile)
+        if (navigator.vibrate) navigator.vibrate(200);
         alert("Rest over!");
       }
-    }, 200); // Update more frequently for smooth display
+    }, 200);
   }
 
   function updateTimerDisplay() {
@@ -262,7 +558,6 @@ input, select, textarea {
     const remaining = Math.max(0, Math.ceil((timerEndTime - Date.now()) / 1000));
     timerDiv.innerText = formatTime(remaining);
     
-    // Save timer state to localStorage for recovery
     if (data.activeWorkout) {
       data.activeWorkout.timerEndTime = timerEndTime;
       data.activeWorkout.timerDuration = timerDuration;
@@ -280,13 +575,11 @@ input, select, textarea {
     if (data.activeWorkout && data.activeWorkout.timerEndTime) {
       const now = Date.now();
       if (now < data.activeWorkout.timerEndTime) {
-        // Timer still active
         const remaining = Math.ceil((data.activeWorkout.timerEndTime - now) / 1000);
         timerEndTime = data.activeWorkout.timerEndTime;
         timerDuration = data.activeWorkout.timerDuration;
         startTimer(remaining);
       } else {
-        // Timer expired
         data.activeWorkout.timerEndTime = null;
         data.activeWorkout.timerDuration = null;
         save();
@@ -314,16 +607,40 @@ input, select, textarea {
   }
   parseShareLink();
 
-  // ----- RENDER HOME (full history with delete) -----
+  // ----- RENDER HOME (with export options) -----
   function renderHome() {
+    const stats = calculateStats();
     const app = document.getElementById("app");
+    
     app.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h2>📋 Templates</h2>
+        <h2>📋 Workout Tracker</h2>
         <span class="version-badge">v${APP_VERSION}</span>
       </div>
+      
+      <div class="stats-card" onclick="showStats()" style="cursor:pointer;">
+        <div style="font-size:14px; color:#aaa;">Quick Stats (click for more)</div>
+        <div style="display:flex; justify-content:space-around; margin-top:10px;">
+          <div><span style="color:#4caf50;">${stats.totalWorkouts}</span> workouts</div>
+          <div><span style="color:#4caf50;">${stats.totalSets}</span> sets</div>
+          <div><span style="color:#4caf50;">${Math.round(stats.totalWeight)} kg</span> total</div>
+        </div>
+      </div>
+      
+      <div class="export-options">
+        <button class="small-btn" onclick="exportAllData()" style="background:#1e3a5f; flex:1;">💾 Backup All</button>
+        <button class="small-btn" onclick="exportHistory('json')" style="background:#2c3e50; flex:1;">📊 History JSON</button>
+        <button class="small-btn" onclick="exportHistory('csv')" style="background:#2c3e50; flex:1;">📈 History CSV</button>
+      </div>
+      
+      <div class="export-options">
+        <button class="small-btn" onclick="importBackup()" style="background:#4a2c2c; flex:1;">📂 Import Backup</button>
+        <button class="small-btn" onclick="mergeBackup()" style="background:#2c4a2c; flex:1;">🔄 Merge Backup</button>
+      </div>
+      
+      <h3>📋 Templates</h3>
       <button onclick="createTemplate()">➕ Create Template</button>
-      <button onclick="exportPrompt()" style="background:#1e3a5f;">🔗 Share / Import</button>
+      <button onclick="exportPrompt()" style="background:#1e3a5f;">🔗 Share Templates</button>
       <div id="templateList">
         ${data.templates.map((t,i)=>`
           <div class="template-item">
@@ -345,14 +662,18 @@ input, select, textarea {
       <div id="historyList">
         ${data.history.slice().reverse().map((s, idx) => {
           const realIndex = data.history.length - 1 - idx;
+          const totalWeight = s.logs.reduce((sum, ex) => 
+            sum + ex.sets.reduce((sSum, set) => sSum + (parseFloat(set.weight) || 0), 0), 0);
+          
           return `
           <div class="history-item">
             <div style="display:flex; justify-content:space-between;">
               <b>${s.templateName}</b>
-              <span style="color:#aaa;">${new Date(s.date).toLocaleString()}</span>
+              <span style="color:#aaa;">${new Date(s.date).toLocaleDateString()}</span>
             </div>
+            <div style="color:#4caf50; font-size:14px;">Total: ${Math.round(totalWeight)} kg</div>
             <details>
-              <summary>View details</summary>
+              <summary>View ${s.logs.length} exercises</summary>
               ${s.logs.map(l => `
                 <div style="margin:6px 0; background:#2a2a2a; padding:6px; border-radius:6px;">
                   <b>${l.name}</b><br>
@@ -404,7 +725,7 @@ input, select, textarea {
   };
 
   window.clearAllHistory = () => {
-    if (confirm('Delete ALL history? This cannot be undone.')) {
+    if (confirm('Delete ALL history? This cannot be undone. Consider exporting first!')) {
       data.history = [];
       save();
       renderHome();
@@ -647,7 +968,6 @@ input, select, textarea {
       <button onclick="nextExercise()">⏩ Next Exercise</button>
     `;
 
-    // Check if we need to restore a timer
     checkAndRestoreTimer();
   }
 
@@ -657,79 +977,4 @@ input, select, textarea {
     save();
   };
 
-  window.completeSet = (si) => {
-    const w = data.activeWorkout;
-    const set = w.logs[w.currentExercise].sets[si];
-    if(parseInt(set.reps) > 15){
-      alert("More than 15 reps. Consider increasing weight. Logged anyway.");
-    }
-    startTimer(w.rest);
-  };
-
-  window.nextExercise = () => {
-    const w = data.activeWorkout;
-    clearInterval(timerInterval);
-    if(w.currentExercise < w.logs.length-1){
-      w.currentExercise++;
-      w.timerEndTime = null;
-      w.timerDuration = null;
-      save();
-      renderWorkout();
-    } else {
-      const historyEntry = {
-        date: new Date().toISOString(),
-        templateName: w.name,
-        logs: w.logs,
-        id: w.templateId
-      };
-      data.history.push(historyEntry);
-      data.activeWorkout = null;
-      save();
-      alert("Workout complete! Saved to history.");
-      renderHome();
-    }
-  };
-
-  window.endWorkout = () => {
-    if (data.activeWorkout) {
-      if (confirm('Save current progress to history?')) {
-        const w = data.activeWorkout;
-        data.history.push({
-          date: new Date().toISOString(),
-          templateName: w.name,
-          logs: w.logs,
-          id: w.templateId
-        });
-      }
-    }
-    data.activeWorkout = null;
-    clearInterval(timerInterval);
-    save();
-    renderHome();
-  };
-
-  // Add version check on page load
-  window.addEventListener('load', () => {
-    // Re-run merge on each load to catch any new default templates
-    mergeTemplates();
-    save();
-    renderHome();
-  });
-
-  // Handle page visibility changes for timer
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && data.activeWorkout) {
-      // Page became visible again, check timer
-      checkAndRestoreTimer();
-    }
-  });
-
-  // expose globals
-  window.renderHome = renderHome;
-  window.save = save;
-
-  renderHome();
-})();
-</script>
-</body>
-</html>
+  window
