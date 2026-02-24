@@ -105,7 +105,7 @@ input, select, textarea {
 
 <script>
 (function() {
-  const APP_VERSION = '2.2.0'; // drag & full history
+  const APP_VERSION = '2.3.0'; // template merging & background timer
 
   // Clear storage on version mismatch
   if (localStorage.getItem('workoutApp_version') !== APP_VERSION) {
@@ -113,10 +113,10 @@ input, select, textarea {
     localStorage.setItem('workoutApp_version', APP_VERSION);
   }
 
-  // ----- DEFAULT TEMPLATES -----
+  // ----- DEFAULT TEMPLATES (with unique IDs) -----
   let defaultTemplates = [
     {
-      id: 'upper1-' + Date.now() + '-1',
+      id: 'upper1-default',
       name: "Upper 1 – Pull Dominant",
       rest: 120,
       repRange: "8-15",
@@ -130,7 +130,7 @@ input, select, textarea {
       ]
     },
     {
-      id: 'lower1-' + Date.now() + '-2',
+      id: 'lower1-default',
       name: "Lower 1 – Quad Emphasis",
       rest: 120,
       repRange: "8-15",
@@ -142,7 +142,7 @@ input, select, textarea {
       ]
     },
     {
-      id: 'upper2-' + Date.now() + '-3',
+      id: 'upper2-default',
       name: "Upper 2 – Push Dominant",
       rest: 120,
       repRange: "8-15",
@@ -156,7 +156,7 @@ input, select, textarea {
       ]
     },
     {
-      id: 'lower2-' + Date.now() + '-4',
+      id: 'lower2-default',
       name: "Lower 2 – Glute / Hinge Emphasis",
       rest: 120,
       repRange: "8-15",
@@ -168,8 +168,8 @@ input, select, textarea {
       ]
     },
     {
-      id: 'full-' + Date.now() + '-5',
-      name: "Full",
+      id: 'full-default',
+      name: "Full Body",
       rest: 120,
       repRange: "8-15",
       exercises: [
@@ -177,7 +177,7 @@ input, select, textarea {
         { name: "Incline push", sets: 2 },
         { name: "Horizontal pull", sets: 2 },
         { name: "Lateral raises", sets: 2 },      
-        { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
+        { name: "Romanian Deadlift", sets: 3 },
         { name: "Goblet squats", sets: 3 },
         { name: "Bulgarian Split Squats", sets: 3 }
       ]
@@ -185,22 +185,116 @@ input, select, textarea {
   ];
 
   let data = JSON.parse(localStorage.getItem("workoutApp")) || {
-    templates: defaultTemplates,
+    templates: [],
     activeWorkout: null,
     history: []
   };
 
-  // Ensure IDs
-  data.templates = data.templates.map(t => ({
-    id: t.id || 'tpl-' + Date.now() + '-' + Math.random().toString(36),
-    ...t
-  }));
+  // MERGE TEMPLATES: Preserve user edits but add any new default templates
+  function mergeTemplates() {
+    const existingTemplates = data.templates || [];
+    const existingIds = new Set(existingTemplates.map(t => t.id));
+    
+    // Add any default templates that don't exist
+    const newTemplates = defaultTemplates.filter(dt => !existingIds.has(dt.id));
+    
+    if (newTemplates.length > 0) {
+      console.log(`Adding ${newTemplates.length} new templates`);
+      data.templates = [...existingTemplates, ...newTemplates];
+    } else {
+      data.templates = existingTemplates;
+    }
+    
+    // Ensure all templates have proper structure
+    data.templates = data.templates.map(t => ({
+      id: t.id || 'tpl-' + Date.now() + '-' + Math.random().toString(36),
+      name: t.name || 'Unnamed Template',
+      rest: t.rest || 120,
+      repRange: t.repRange || "8-15",
+      exercises: t.exercises || []
+    }));
+  }
+
+  // Run the merge
+  mergeTemplates();
 
   function save() {
     localStorage.setItem("workoutApp", JSON.stringify(data));
   }
 
-  // ----- SHARE / IMPORT (unchanged, but keep) -----
+  // ----- BACKGROUND TIMER USING SERVICE WORKER IDEA -----
+  let timerInterval = null;
+  let timerEndTime = null;
+  let timerDuration = null;
+
+  function startTimer(seconds) {
+    const timerDiv = document.getElementById("timer");
+    if (!timerDiv) return;
+    
+    clearInterval(timerInterval);
+    
+    // Store end time for persistence
+    timerDuration = seconds;
+    timerEndTime = Date.now() + (seconds * 1000);
+    
+    // Update timer immediately
+    updateTimerDisplay();
+    
+    // Set interval to update display
+    timerInterval = setInterval(() => {
+      updateTimerDisplay();
+      
+      // Check if timer expired
+      if (Date.now() >= timerEndTime) {
+        clearInterval(timerInterval);
+        if (document.getElementById("timer")) {
+          document.getElementById("timer").innerText = "0:00";
+        }
+        alert("Rest over!");
+      }
+    }, 200); // Update more frequently for smooth display
+  }
+
+  function updateTimerDisplay() {
+    const timerDiv = document.getElementById("timer");
+    if (!timerDiv || !timerEndTime) return;
+    
+    const remaining = Math.max(0, Math.ceil((timerEndTime - Date.now()) / 1000));
+    timerDiv.innerText = formatTime(remaining);
+    
+    // Save timer state to localStorage for recovery
+    if (data.activeWorkout) {
+      data.activeWorkout.timerEndTime = timerEndTime;
+      data.activeWorkout.timerDuration = timerDuration;
+      save();
+    }
+  }
+
+  function formatTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec < 10 ? "0" : ""}${sec}`;
+  }
+
+  function checkAndRestoreTimer() {
+    if (data.activeWorkout && data.activeWorkout.timerEndTime) {
+      const now = Date.now();
+      if (now < data.activeWorkout.timerEndTime) {
+        // Timer still active
+        const remaining = Math.ceil((data.activeWorkout.timerEndTime - now) / 1000);
+        timerEndTime = data.activeWorkout.timerEndTime;
+        timerDuration = data.activeWorkout.timerDuration;
+        startTimer(remaining);
+      } else {
+        // Timer expired
+        data.activeWorkout.timerEndTime = null;
+        data.activeWorkout.timerDuration = null;
+        save();
+      }
+    }
+  }
+
+  // ----- SHARE / IMPORT -----
   function parseShareLink() {
     const hash = window.location.hash.substring(1);
     if (!hash) return;
@@ -250,7 +344,7 @@ input, select, textarea {
       <button class="small-btn" onclick="clearAllHistory()" style="background:#5f1f1f;">🗑️ Clear All History</button>
       <div id="historyList">
         ${data.history.slice().reverse().map((s, idx) => {
-          const realIndex = data.history.length - 1 - idx; // original index for deletion
+          const realIndex = data.history.length - 1 - idx;
           return `
           <div class="history-item">
             <div style="display:flex; justify-content:space-between;">
@@ -277,7 +371,6 @@ input, select, textarea {
       </div>
     `;
 
-    // re-attach share selection bar if needed
     if (selectedShareIds.length > 0) {
       let bar = document.getElementById('shareBar');
       if (!bar) {
@@ -318,7 +411,7 @@ input, select, textarea {
     }
   };
 
-  // ----- SHARE SELECTION (unchanged) -----
+  // ----- SHARE SELECTION -----
   let selectedShareIds = [];
   window.selectForShare = (id) => {
     if (selectedShareIds.includes(id)) {
@@ -397,7 +490,7 @@ input, select, textarea {
     return data.templates.findIndex(t => t.id === id);
   }
 
-  // ----- EDIT TEMPLATE (with inline exercise editing & drag) -----
+  // ----- EDIT TEMPLATE -----
   window.editTemplate = (id) => {
     const i = findTemplateIndex(id);
     if (i === -1) return renderHome();
@@ -438,7 +531,6 @@ input, select, textarea {
         draggedItem = card;
         card.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
-        // store indices
         e.dataTransfer.setData('text/plain', card.dataset.index);
       });
 
@@ -458,21 +550,19 @@ input, select, textarea {
 
         const fromIndex = parseInt(draggedItem.dataset.index);
         const toIndex = parseInt(card.dataset.index);
-        const templateId = card.dataset.id; // same for all
+        const templateId = card.dataset.id;
 
         const tIdx = findTemplateIndex(templateId);
         if (tIdx === -1) return;
         const exercises = data.templates[tIdx].exercises;
-        // reorder
         const [moved] = exercises.splice(fromIndex, 1);
         exercises.splice(toIndex, 0, moved);
         save();
-        editTemplate(templateId); // re-render
+        editTemplate(templateId);
       });
     });
   };
 
-  // inline edit exercise
   window.editExercise = (templateId, exerciseIdx) => {
     const i = findTemplateIndex(templateId);
     if (i === -1) return;
@@ -514,7 +604,7 @@ input, select, textarea {
     editTemplate(id);
   };
 
-  // ----- WORKOUT START (unchanged) -----
+  // ----- WORKOUT START -----
   window.startWorkout = (id) => {
     const i = findTemplateIndex(id);
     if (i===-1) return;
@@ -526,37 +616,14 @@ input, select, textarea {
     }));
     template.startedAt = new Date().toISOString();
     template.templateId = id;
+    template.timerEndTime = null;
+    template.timerDuration = null;
     data.activeWorkout = template;
     save();
     renderWorkout();
   };
 
-  let timerInterval=null;
-
-  function startTimer(seconds){
-    let remaining = seconds;
-    const timerDiv = document.getElementById("timer");
-    if (!timerDiv) return;
-    clearInterval(timerInterval);
-    timerDiv.innerText = formatTime(remaining);
-    timerInterval = setInterval(()=>{
-      remaining--;
-      if (timerDiv) timerDiv.innerText = formatTime(remaining);
-      if(remaining<=0){
-        clearInterval(timerInterval);
-        if (timerDiv) timerDiv.innerText = "0:00";
-        alert("Rest over!");
-      }
-    },1000);
-  }
-
-  function formatTime(s){
-    const m = Math.floor(s/60);
-    const sec = s%60;
-    return `${m}:${sec<10?"0":""}${sec}`;
-  }
-
-  function renderWorkout(){
+  function renderWorkout() {
     const w = data.activeWorkout;
     if(!w) return renderHome();
 
@@ -579,6 +646,9 @@ input, select, textarea {
       <div class="timer" id="timer">${formatTime(w.rest)}</div>
       <button onclick="nextExercise()">⏩ Next Exercise</button>
     `;
+
+    // Check if we need to restore a timer
+    checkAndRestoreTimer();
   }
 
   window.updateSet = (si,key,val) => {
@@ -598,8 +668,11 @@ input, select, textarea {
 
   window.nextExercise = () => {
     const w = data.activeWorkout;
+    clearInterval(timerInterval);
     if(w.currentExercise < w.logs.length-1){
       w.currentExercise++;
+      w.timerEndTime = null;
+      w.timerDuration = null;
       save();
       renderWorkout();
     } else {
@@ -634,6 +707,22 @@ input, select, textarea {
     save();
     renderHome();
   };
+
+  // Add version check on page load
+  window.addEventListener('load', () => {
+    // Re-run merge on each load to catch any new default templates
+    mergeTemplates();
+    save();
+    renderHome();
+  });
+
+  // Handle page visibility changes for timer
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && data.activeWorkout) {
+      // Page became visible again, check timer
+      checkAndRestoreTimer();
+    }
+  });
 
   // expose globals
   window.renderHome = renderHome;
