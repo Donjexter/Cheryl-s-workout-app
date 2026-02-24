@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · Full History & Export</title>
+<title>Workout Tracker · Full History & Drag</title>
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -83,7 +83,6 @@ input, select, textarea {
   display: flex;
   gap: 8px;
   margin-top: 8px;
-  flex-wrap: wrap;
 }
 .version-badge {
   background: #333;
@@ -93,83 +92,11 @@ input, select, textarea {
   color: #aaa;
   text-align: center;
 }
-.stats-card {
-  background: #1e3a5f;
-  padding: 15px;
-  border-radius: 10px;
-  margin: 10px 0;
-  text-align: center;
-  cursor: pointer;
-}
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin: 10px 0;
-}
-.stat-box {
-  background: #2c3e50;
-  padding: 10px;
+.edit-exercise-form {
+  background: #2a2a2a;
+  padding: 12px;
   border-radius: 8px;
-  text-align: center;
-}
-.stat-value {
-  font-size: 24px;
-  font-weight: bold;
-  color: #4caf50;
-}
-.stat-label {
-  font-size: 12px;
-  color: #aaa;
-}
-.export-options {
-  display: flex;
-  gap: 8px;
-  margin: 10px 0;
-  flex-wrap: wrap;
-}
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-.modal-content {
-  background: #1c1c1c;
-  padding: 20px;
-  border-radius: 12px;
-  max-width: 90%;
-  max-height: 80%;
-  overflow: auto;
-  position: relative;
-}
-.close-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: none;
-  border: none;
-  color: white;
-  font-size: 24px;
-  cursor: pointer;
-  width: auto;
-}
-.share-bar {
-  position: sticky;
-  bottom: 10px;
-  background: #2c3e50;
-  padding: 10px;
-  border-radius: 30px;
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
-  z-index: 100;
+  margin: 8px 0;
 }
 </style>
 </head>
@@ -178,830 +105,216 @@ input, select, textarea {
 
 <script>
 (function() {
-  const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.3.0'; // updated version
 
-  // Load or initialize data
-  let data;
+// ----- DEFAULT TEMPLATES -----
+let defaultTemplates = [
+  {
+    id: 'upper1-' + Date.now() + '-1',
+    name: "Upper 1 – Pull Dominant",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Vertical Pull (Wide Grip)", sets: 2 },
+      { name: "Horizontal Row", sets: 2 },
+      { name: "Vertical Pull (Close / Neutral)", sets: 2 },
+      { name: "Incline Press (60°)", sets: 2 },
+      { name: "Lateral Raises", sets: 2 },
+      { name: "Optional Arms", sets: 2 }
+    ]
+  },
+  {
+    id: 'lower1-' + Date.now() + '-2',
+    name: "Lower 1 – Quad Emphasis",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Quad Dominant Squat", sets: 3 },
+      { name: "Bulgarian Split Squats (Shorter Stride)", sets: 3 },
+      { name: "Romanian Deadlift", sets: 3 },
+      { name: "Hip Thrust", sets: 3 }
+    ]
+  },
+  {
+    id: 'upper2-' + Date.now() + '-3',
+    name: "Upper 2 – Push Dominant",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Overhead Press", sets: 2 },
+      { name: "Incline Press (60°)", sets: 2 },
+      { name: "Lateral Raises", sets: 2 },
+      { name: "Horizontal Row (Different Variation)", sets: 2 },
+      { name: "Vertical Pull (Neutral or Supinated)", sets: 2 },
+      { name: "Optional Arms", sets: 2 }
+    ]
+  },
+  {
+    id: 'lower2-' + Date.now() + '-4',
+    name: "Lower 2 – Glute / Hinge Emphasis",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
+      { name: "Hip Thrust (Heavier Than Lower 1)", sets: 3 },
+      { name: "Glute Dominant Squat", sets: 3 },
+      { name: "Bulgarian Split Squats (Longer Stride)", sets: 3 }
+    ]
+  },
+  {
+    id: 'full-' + Date.now() + '-5',
+    name: "Full",
+    rest: 120,
+    repRange: "8-15",
+    exercises: [
+      { name: "Pull up/down", sets: 2 },
+      { name: "Incline push", sets: 2 },
+      { name: "Horizontal pull", sets: 2 },
+      { name: "Lateral raises", sets: 2 },      
+      { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
+      { name: "Goblet squats", sets: 3 },
+      { name: "Bulgarian Split Squats", sets: 3 }
+    ]
+  }
+];
+
+// ----- LOAD & MERGE EXISTING DATA -----
+let savedData = JSON.parse(localStorage.getItem("workoutApp")) || { templates: [], activeWorkout: null, history: [] };
+
+// Merge default templates without overwriting user edits (by name)
+defaultTemplates.forEach(defTpl => {
+  const exists = savedData.templates.some(t => t.name === defTpl.name);
+  if (!exists) savedData.templates.push(defTpl);
+});
+
+// Ensure IDs
+savedData.templates = savedData.templates.map(t => ({
+  id: t.id || 'tpl-' + Date.now() + '-' + Math.random().toString(36),
+  ...t
+}));
+
+let data = savedData;
+localStorage.setItem("workoutApp_version", APP_VERSION);
+
+function save() { localStorage.setItem("workoutApp", JSON.stringify(data)); }
+
+// ----- SHARE / IMPORT -----
+function parseShareLink() {
+  const hash = window.location.hash.substring(1);
+  if (!hash) return;
   try {
-    data = JSON.parse(localStorage.getItem("workoutApp")) || {
-      templates: [],
-      activeWorkout: null,
-      history: []
-    };
-  } catch (e) {
-    data = {
-      templates: [],
-      activeWorkout: null,
-      history: []
-    };
-  }
-
-  // Default templates
-  let defaultTemplates = [
-    {
-      id: 'upper1-default',
-      name: "Upper 1 – Pull Dominant",
-      rest: 120,
-      repRange: "8-15",
-      exercises: [
-        { name: "Vertical Pull (Wide Grip)", sets: 2 },
-        { name: "Horizontal Row", sets: 2 },
-        { name: "Vertical Pull (Close / Neutral)", sets: 2 },
-        { name: "Incline Press (60°)", sets: 2 },
-        { name: "Lateral Raises", sets: 2 },
-        { name: "Optional Arms", sets: 2 }
-      ]
-    },
-    {
-      id: 'lower1-default',
-      name: "Lower 1 – Quad Emphasis",
-      rest: 120,
-      repRange: "8-15",
-      exercises: [
-        { name: "Quad Dominant Squat", sets: 3 },
-        { name: "Bulgarian Split Squats (Shorter Stride)", sets: 3 },
-        { name: "Romanian Deadlift", sets: 3 },
-        { name: "Hip Thrust", sets: 3 }
-      ]
-    },
-    {
-      id: 'upper2-default',
-      name: "Upper 2 – Push Dominant",
-      rest: 120,
-      repRange: "8-15",
-      exercises: [
-        { name: "Overhead Press", sets: 2 },
-        { name: "Incline Press (60°)", sets: 2 },
-        { name: "Lateral Raises", sets: 2 },
-        { name: "Horizontal Row (Different Variation)", sets: 2 },
-        { name: "Vertical Pull (Neutral or Supinated)", sets: 2 },
-        { name: "Optional Arms", sets: 2 }
-      ]
-    },
-    {
-      id: 'lower2-default',
-      name: "Lower 2 – Glute / Hinge Emphasis",
-      rest: 120,
-      repRange: "8-15",
-      exercises: [
-        { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
-        { name: "Hip Thrust (Heavier Than Lower 1)", sets: 3 },
-        { name: "Glute Dominant Squat", sets: 3 },
-        { name: "Bulgarian Split Squats (Longer Stride)", sets: 3 }
-      ]
-    },
-    {
-      id: 'full-default',
-      name: "Full Body",
-      rest: 120,
-      repRange: "8-15",
-      exercises: [
-        { name: "Pull up/down", sets: 2 },
-        { name: "Incline push", sets: 2 },
-        { name: "Horizontal pull", sets: 2 },
-        { name: "Lateral raises", sets: 2 },      
-        { name: "Romanian Deadlift", sets: 3 },
-        { name: "Goblet squats", sets: 3 },
-        { name: "Bulgarian Split Squats", sets: 3 }
-      ]
-    }
-  ];
-
-  // Merge templates function
-  function mergeTemplates() {
-    const existingTemplates = data.templates || [];
-    const existingIds = new Set(existingTemplates.map(t => t.id));
-    
-    // Add any default templates that don't exist
-    const newTemplates = defaultTemplates.filter(dt => !existingIds.has(dt.id));
-    
-    if (newTemplates.length > 0) {
-      data.templates = [...existingTemplates, ...newTemplates];
-    } else {
-      data.templates = existingTemplates;
-    }
-    
-    // Ensure all templates have proper structure
-    data.templates = data.templates.map(t => ({
-      id: t.id || 'tpl-' + Date.now() + '-' + Math.random().toString(36).substring(2,8),
-      name: t.name || 'Unnamed Template',
-      rest: t.rest || 120,
-      repRange: t.repRange || "8-15",
-      exercises: t.exercises || []
-    }));
-  }
-
-  // Initialize templates if empty
-  if (data.templates.length === 0) {
-    data.templates = [...defaultTemplates];
-  } else {
-    mergeTemplates();
-  }
-
-  // Save function
-  function save() {
-    localStorage.setItem("workoutApp", JSON.stringify(data));
-  }
-
-  // Timer variables
-  let timerInterval = null;
-  let timerEndTime = null;
-
-  // Format time
-  function formatTime(s) {
-    if (s < 0) s = 0;
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec < 10 ? "0" : ""}${sec}`;
-  }
-
-  // Start timer
-  function startTimer(seconds) {
-    const timerDiv = document.getElementById("timer");
-    if (!timerDiv) return;
-    
-    if (timerInterval) clearInterval(timerInterval);
-    
-    timerEndTime = Date.now() + (seconds * 1000);
-    
-    function updateDisplay() {
-      if (!timerDiv) return;
-      const remaining = Math.max(0, Math.ceil((timerEndTime - Date.now()) / 1000));
-      timerDiv.innerText = formatTime(remaining);
-      
-      if (remaining <= 0) {
-        clearInterval(timerInterval);
-        timerDiv.innerText = "0:00";
-        if (data.activeWorkout) {
-          data.activeWorkout.timerActive = false;
-          save();
-        }
-        alert("Rest over!");
-      }
-    }
-    
-    updateDisplay();
-    timerInterval = setInterval(updateDisplay, 200);
-    
-    if (data.activeWorkout) {
-      data.activeWorkout.timerEndTime = timerEndTime;
-      data.activeWorkout.timerActive = true;
+    const decoded = atob(hash);
+    const imported = JSON.parse(decoded);
+    if (imported && Array.isArray(imported)) {
+      imported.forEach(t => {
+        t.id = 'shared-' + Date.now() + '-' + Math.random().toString(36).substring(2,8);
+      });
+      data.templates = [...data.templates, ...imported];
       save();
+      alert('Imported ' + imported.length + ' template(s) from link!');
+      window.location.hash = '';
     }
-  }
+  } catch (e) {}
+}
+parseShareLink();
 
-  // Check and restore timer
-  function checkAndRestoreTimer() {
-    if (data.activeWorkout && data.activeWorkout.timerEndTime && data.activeWorkout.timerActive) {
-      const now = Date.now();
-      if (now < data.activeWorkout.timerEndTime) {
-        const remaining = Math.ceil((data.activeWorkout.timerEndTime - now) / 1000);
-        startTimer(remaining);
-      } else {
-        data.activeWorkout.timerActive = false;
-        data.activeWorkout.timerEndTime = null;
-        save();
-      }
-    }
-  }
+// ----- TIMER GLOBAL -----
+let timerInterval = null;
 
-  // Calculate stats
-  function calculateStats() {
-    const stats = {
-      totalWorkouts: data.history.length,
-      totalExercises: 0,
-      totalSets: 0,
-      totalWeight: 0,
-      favoriteExercise: 'N/A',
-      byTemplate: {}
-    };
-    
-    const exerciseCount = {};
-    
-    data.history.forEach(workout => {
-      stats.byTemplate[workout.templateName] = (stats.byTemplate[workout.templateName] || 0) + 1;
-      
-      workout.logs.forEach(exercise => {
-        stats.totalExercises++;
-        exerciseCount[exercise.name] = (exerciseCount[exercise.name] || 0) + 1;
-        
-        exercise.sets.forEach(set => {
-          stats.totalSets++;
-          if (set.weight) stats.totalWeight += parseFloat(set.weight) || 0;
-        });
-      });
-    });
-    
-    let maxCount = 0;
-    Object.entries(exerciseCount).forEach(([name, count]) => {
-      if (count > maxCount) {
-        maxCount = count;
-        stats.favoriteExercise = name;
-      }
-    });
-    
-    return stats;
-  }
-
-  // Export functions
-  window.exportAllData = function() {
-    const exportData = {
-      version: APP_VERSION,
-      exportedAt: new Date().toISOString(),
-      templates: data.templates,
-      history: data.history
-    };
-    
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `workout-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  window.exportHistory = function(format) {
-    if (data.history.length === 0) {
-      alert('No history to export');
-      return;
-    }
-
-    if (format === 'csv') {
-      let csv = 'Date,Template,Exercise,Set,Weight (kg),Reps\n';
-      data.history.forEach(workout => {
-        const date = new Date(workout.date).toLocaleString();
-        workout.logs.forEach(exercise => {
-          exercise.sets.forEach((set, idx) => {
-            csv += `"${date}","${workout.templateName}","${exercise.name}",${idx + 1},${set.weight || ''},${set.reps || ''}\n`;
-          });
-        });
-      });
-      
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `workout-history-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      const historyData = {
-        version: APP_VERSION,
-        exportedAt: new Date().toISOString(),
-        history: data.history
-      };
-      
-      const blob = new Blob([JSON.stringify(historyData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `workout-history-${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-  };
-
-  window.importBackup = function() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      
-      reader.onload = (event) => {
-        try {
-          const imported = JSON.parse(event.target.result);
-          
-          if (confirm('Import backup? This will REPLACE all current data.')) {
-            if (imported.templates) data.templates = imported.templates;
-            if (imported.history) data.history = imported.history;
-            
-            mergeTemplates();
-            save();
-            renderHome();
-            alert('Backup imported successfully!');
-          }
-        } catch (error) {
-          alert('Invalid backup file');
-        }
-      };
-      
-      reader.readAsText(file);
-    };
-    
-    input.click();
-  };
-
-  window.mergeBackup = function() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      
-      reader.onload = (event) => {
-        try {
-          const imported = JSON.parse(event.target.result);
-          
-          if (imported.templates) {
-            const existingIds = new Set(data.templates.map(t => t.id));
-            const newTemplates = imported.templates.filter(t => !existingIds.has(t.id));
-            data.templates = [...data.templates, ...newTemplates];
-          }
-          
-          if (imported.history) {
-            const existingDates = new Set(data.history.map(h => h.date));
-            const newHistory = imported.history.filter(h => !existingDates.has(h.date));
-            data.history = [...data.history, ...newHistory];
-          }
-          
-          save();
-          renderHome();
-          alert('Backup merged successfully!');
-        } catch (error) {
-          alert('Invalid backup file');
-        }
-      };
-      
-      reader.readAsText(file);
-    };
-    
-    input.click();
-  };
-
-  window.showStats = function() {
-    const stats = calculateStats();
-    const modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.innerHTML = `
-      <div class="modal-content">
-        <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
-        <h2>📊 Workout Statistics</h2>
-        
-        <div class="stats-grid">
-          <div class="stat-box">
-            <div class="stat-value">${stats.totalWorkouts}</div>
-            <div class="stat-label">Workouts</div>
+// ----- RENDER HOME -----
+function renderHome() {
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2>📋 Templates</h2>
+      <span class="version-badge">v${APP_VERSION}</span>
+    </div>
+    <button onclick="createTemplate()">➕ Create Template</button>
+    <button onclick="exportPrompt()" style="background:#1e3a5f;">🔗 Share / Import</button>
+    <div id="templateList">
+      ${data.templates.map((t,i)=>`
+        <div class="template-item">
+          <div style="display:flex; justify-content:space-between;">
+            <b>${t.name}</b> <span style="color:#888;">${t.exercises.length} ex</span>
           </div>
-          <div class="stat-box">
-            <div class="stat-value">${stats.totalExercises}</div>
-            <div class="stat-label">Exercises</div>
+          <div class="flex-row" style="margin-top:8px;">
+            <button class="small-btn" onclick="startWorkout('${t.id}')">▶️ Start</button>
+            <button class="small-btn" onclick="editTemplate('${t.id}')">✏️ Edit</button>
+            <button class="small-btn" onclick="deleteTemplate('${t.id}')">🗑️</button>
+            <button class="small-btn" onclick="selectForShare('${t.id}')" style="background:#3a2a2a;">🔗 Select</button>
           </div>
-          <div class="stat-box">
-            <div class="stat-value">${stats.totalSets}</div>
-            <div class="stat-label">Sets</div>
-          </div>
-        </div>
-        
-        <div class="stats-grid">
-          <div class="stat-box">
-            <div class="stat-value">${Math.round(stats.totalWeight)} kg</div>
-            <div class="stat-label">Total Weight</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value">${stats.favoriteExercise}</div>
-            <div class="stat-label">Favorite</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value">${Object.keys(stats.byTemplate).length}</div>
-            <div class="stat-label">Templates Used</div>
-          </div>
-        </div>
-        
-        <h3>Workouts by Template</h3>
-        ${Object.entries(stats.byTemplate).map(([name, count]) => `
-          <div style="display:flex; justify-content:space-between; margin:5px 0; padding:5px; background:#2a2a2a; border-radius:4px;">
-            <span>${name}</span>
-            <span style="color:#4caf50;">${count}</span>
-          </div>
-        `).join('')}
-      </div>
-    `;
-    
-    document.getElementById('app').appendChild(modal);
-  };
-
-  // Share variables
-  let selectedShareIds = [];
-
-  window.selectForShare = function(id) {
-    if (selectedShareIds.includes(id)) {
-      selectedShareIds = selectedShareIds.filter(sid => sid !== id);
-    } else {
-      selectedShareIds.push(id);
-    }
-    renderHome();
-  };
-
-  window.copyShareLink = function() {
-    const selected = data.templates.filter(t => selectedShareIds.includes(t.id));
-    if (!selected.length) return alert('No templates selected');
-    const clean = selected.map(({ id, name, rest, repRange, exercises }) => ({
-      id, name, rest, repRange, exercises
-    }));
-    const encoded = btoa(JSON.stringify(clean));
-    const url = window.location.origin + window.location.pathname + '#' + encoded;
-    navigator.clipboard.writeText(url).then(() => {
-      alert('Share link copied!');
-      selectedShareIds = [];
-      renderHome();
-    });
-  };
-
-  window.exportPrompt = function() {
-    const importCode = prompt('Paste a share link or JSON to import templates:');
-    if (!importCode) return;
-    try {
-      let parsed;
-      if (importCode.startsWith('http')) {
-        const hash = importCode.split('#')[1];
-        if (!hash) throw new Error('No hash');
-        parsed = JSON.parse(atob(hash));
-      } else {
-        parsed = JSON.parse(importCode);
-      }
-      if (Array.isArray(parsed)) {
-        parsed.forEach(t => {
-          t.id = 'imported-' + Date.now() + '-' + Math.random().toString(36).substring(2,8);
-          data.templates.push(t);
-        });
-        save();
-        renderHome();
-        alert('Imported successfully.');
-      } else throw new Error('Invalid format');
-    } catch (e) {
-      alert('Could not import. Make sure it is a valid share link or JSON array.');
-    }
-  };
-
-  // Parse share link
-  function parseShareLink() {
-    const hash = window.location.hash.substring(1);
-    if (!hash) return;
-    try {
-      const decoded = atob(hash);
-      const imported = JSON.parse(decoded);
-      if (imported && Array.isArray(imported)) {
-        imported.forEach(t => {
-          t.id = 'shared-' + Date.now() + '-' + Math.random().toString(36).substring(2,8);
-        });
-        data.templates = [...data.templates, ...imported];
-        save();
-        alert('Imported ' + imported.length + ' template(s) from link!');
-        window.location.hash = '';
-      }
-    } catch (e) {}
-  }
-  parseShareLink();
-
-  // Template CRUD
-  window.createTemplate = function() {
-    const name = prompt("Template Name:");
-    if(!name) return;
-    data.templates.push({
-      id: 'manual-' + Date.now() + '-' + Math.random().toString(36).substring(2,8),
-      name,
-      rest: 120,
-      repRange: "8-15",
-      exercises: []
-    });
-    save();
-    renderHome();
-  };
-
-  window.deleteTemplate = function(id) {
-    if(confirm("Delete template?")){
-      data.templates = data.templates.filter(t => t.id !== id);
-      save();
-      renderHome();
-    }
-  };
-
-  window.deleteHistoryEntry = function(index) {
-    if (confirm('Delete this history entry?')) {
-      data.history.splice(index, 1);
-      save();
-      renderHome();
-    }
-  };
-
-  window.clearAllHistory = function() {
-    if (confirm('Delete ALL history? This cannot be undone. Consider exporting first!')) {
-      data.history = [];
-      save();
-      renderHome();
-    }
-  };
-
-  function findTemplateIndex(id) {
-    return data.templates.findIndex(t => t.id === id);
-  }
-
-  window.editTemplate = function(id) {
-    const i = findTemplateIndex(id);
-    if (i === -1) return renderHome();
-    const template = data.templates[i];
-    const app = document.getElementById("app");
-
-    app.innerHTML = `
-      <button onclick="renderHome()">← Back</button>
-      <h2>${template.name}</h2>
-      <label>Rest (seconds)</label>
-      <input value="${template.rest}" onchange="updateRest('${id}',this.value)">
-      <h3>Exercises (drag handle ⋮⋮ to reorder)</h3>
-      <div id="exerciseList" style="margin: 10px 0;">
-        ${template.exercises.map((e, ei) => `
-          <div class="exercise-card" draggable="true" data-index="${ei}" data-id="${id}">
-            <div style="display:flex; align-items:center;">
-              <span class="drag-handle">⋮⋮</span>
-              <div style="flex:1;">
-                <b>${e.name}</b> (${e.sets} sets)
-              </div>
-            </div>
-            <div class="flex-row" style="margin-top:8px; justify-content:flex-end;">
-              <button class="small-btn" onclick="editExercise('${id}', ${ei})">✏️ Edit</button>
-              <button class="small-btn" onclick="deleteExercise('${id}', ${ei})">🗑️</button>
-            </div>
-          </div>
-        `).join("")}
-      </div>
-      <button onclick="addExercise('${id}')">+ Add Exercise</button>
-    `;
-
-    // drag & drop setup
-    const list = document.getElementById('exerciseList');
-    let draggedItem = null;
-
-    list.querySelectorAll('.exercise-card').forEach(card => {
-      card.addEventListener('dragstart', (e) => {
-        draggedItem = card;
-        card.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', card.dataset.index);
-      });
-
-      card.addEventListener('dragend', () => {
-        card.classList.remove('dragging');
-        draggedItem = null;
-      });
-
-      card.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-      });
-
-      card.addEventListener('drop', (e) => {
-        e.preventDefault();
-        if (!draggedItem || draggedItem === card) return;
-
-        const fromIndex = parseInt(draggedItem.dataset.index);
-        const toIndex = parseInt(card.dataset.index);
-        const templateId = card.dataset.id;
-
-        const tIdx = findTemplateIndex(templateId);
-        if (tIdx === -1) return;
-        const exercises = data.templates[tIdx].exercises;
-        const [moved] = exercises.splice(fromIndex, 1);
-        exercises.splice(toIndex, 0, moved);
-        save();
-        editTemplate(templateId);
-      });
-    });
-  };
-
-  window.editExercise = function(templateId, exerciseIdx) {
-    const i = findTemplateIndex(templateId);
-    if (i === -1) return;
-    const exercise = data.templates[i].exercises[exerciseIdx];
-    const newName = prompt("Edit exercise name:", exercise.name);
-    if (newName === null) return;
-    const newSets = prompt("Number of sets:", exercise.sets);
-    if (newSets === null) return;
-    exercise.name = newName;
-    exercise.sets = parseInt(newSets) || exercise.sets;
-    save();
-    editTemplate(templateId);
-  };
-
-  window.updateRest = function(id,val) {
-    const i = findTemplateIndex(id);
-    if (i!==-1) data.templates[i].rest = parseInt(val);
-    save();
-  };
-
-  window.addExercise = function(id) {
-    const i = findTemplateIndex(id);
-    if (i===-1) return;
-    const name = prompt("Exercise name:");
-    const sets = prompt("Number of sets:", 2);
-    if(!name) return;
-    data.templates[i].exercises.push({
-      name,
-      sets: parseInt(sets)
-    });
-    save();
-    editTemplate(id);
-  };
-
-  window.deleteExercise = function(id, ei) {
-    const i = findTemplateIndex(id);
-    data.templates[i].exercises.splice(ei,1);
-    save();
-    editTemplate(id);
-  };
-
-  // Workout functions
-  window.startWorkout = function(id) {
-    const i = findTemplateIndex(id);
-    if (i===-1) return;
-    const template = JSON.parse(JSON.stringify(data.templates[i]));
-    template.currentExercise = 0;
-    template.logs = template.exercises.map(e=>({
-      name: e.name,
-      sets: Array.from({length: e.sets}, () => ({weight:"",reps:""}))
-    }));
-    template.startedAt = new Date().toISOString();
-    template.templateId = id;
-    template.timerActive = false;
-    template.timerEndTime = null;
-    data.activeWorkout = template;
-    save();
-    renderWorkout();
-  };
-
-  function renderWorkout() {
-    const w = data.activeWorkout;
-    if(!w) return renderHome();
-
-    const exercise = w.logs[w.currentExercise];
-    const app = document.getElementById("app");
-
-    app.innerHTML = `
-      <button onclick="endWorkout()">🏁 End Workout</button>
-      <h2>${exercise.name}</h2>
-      ${exercise.sets.map((set,si)=>`
-        <div class="exercise-card">
-          <b>Set ${si+1}</b><br>
-          <input placeholder="Weight (kg)" value="${set.weight || ''}" 
-            onchange="updateSet(${si},'weight',this.value)">
-          <input placeholder="Reps" value="${set.reps || ''}" 
-            onchange="updateSet(${si},'reps',this.value)">
-          <button class="small-btn" style="background:#2e7d32;" onclick="completeSet(${si})">✅ Log & Rest</button>
         </div>
       `).join("")}
-      <div class="timer" id="timer">${formatTime(w.rest)}</div>
-      <button onclick="nextExercise()">⏩ Next Exercise</button>
-    `;
+    </div>
 
-    checkAndRestoreTimer();
-  }
-
-  window.updateSet = function(si,key,val) {
-    const w = data.activeWorkout;
-    w.logs[w.currentExercise].sets[si][key] = val;
-    save();
-  };
-
-  window.completeSet = function(si) {
-    const w = data.activeWorkout;
-    const set = w.logs[w.currentExercise].sets[si];
-    if(parseInt(set.reps) > 15){
-      alert("More than 15 reps. Consider increasing weight. Logged anyway.");
-    }
-    startTimer(w.rest);
-  };
-
-  window.nextExercise = function() {
-    const w = data.activeWorkout;
-    if (timerInterval) clearInterval(timerInterval);
-    
-    if(w.currentExercise < w.logs.length-1){
-      w.currentExercise++;
-      w.timerActive = false;
-      w.timerEndTime = null;
-      save();
-      renderWorkout();
-    } else {
-      const historyEntry = {
-        date: new Date().toISOString(),
-        templateName: w.name,
-        logs: w.logs,
-        id: w.templateId
-      };
-      data.history.push(historyEntry);
-      data.activeWorkout = null;
-      save();
-      alert("Workout complete! Saved to history.");
-      renderHome();
-    }
-  };
-
-  window.endWorkout = function() {
-    if (data.activeWorkout) {
-      if (confirm('Save current progress to history?')) {
-        const w = data.activeWorkout;
-        data.history.push({
-          date: new Date().toISOString(),
-          templateName: w.name,
-          logs: w.logs,
-          id: w.templateId
-        });
-      }
-    }
-    data.activeWorkout = null;
-    if (timerInterval) clearInterval(timerInterval);
-    save();
-    renderHome();
-  };
-
-  // Render home
-  function renderHome() {
-    const stats = calculateStats();
-    const app = document.getElementById("app");
-    
-    app.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h2>📋 Workout Tracker</h2>
-        <span class="version-badge">v${APP_VERSION}</span>
-      </div>
-      
-      <div class="stats-card" onclick="showStats()">
-        <div style="font-size:14px; color:#aaa;">Quick Stats (click for more)</div>
-        <div style="display:flex; justify-content:space-around; margin-top:10px;">
-          <div><span style="color:#4caf50;">${stats.totalWorkouts}</span> workouts</div>
-          <div><span style="color:#4caf50;">${stats.totalSets}</span> sets</div>
-          <div><span style="color:#4caf50;">${Math.round(stats.totalWeight)} kg</span> total</div>
+    <h3 style="margin-top:24px;">📜 Full History (${data.history.length})</h3>
+    <button class="small-btn" onclick="clearAllHistory()" style="background:#5f1f1f;">🗑️ Clear All History</button>
+    <div id="historyList">
+      ${data.history.slice().reverse().map((s, idx) => {
+        const realIndex = data.history.length - 1 - idx;
+        return `
+        <div class="history-item">
+          <div style="display:flex; justify-content:space-between;">
+            <b>${s.templateName}</b>
+            <span style="color:#aaa;">${new Date(s.date).toLocaleString()}</span>
+          </div>
+          <details>
+            <summary>View details</summary>
+            ${s.logs.map(l => `
+              <div style="margin:6px 0; background:#2a2a2a; padding:6px; border-radius:6px;">
+                <b>${l.name}</b><br>
+                ${l.sets.map((set, setIdx) => `Set ${setIdx+1}: ${set.weight || '?'} kg × ${set.reps || '?'} reps`).join('<br>')}
+              </div>
+            `).join('')}
+          </details>
+          <div class="history-actions">
+            <button class="small-btn" onclick="deleteHistoryEntry(${realIndex})" style="background:#7a2a2a;">Delete</button>
+          </div>
         </div>
-      </div>
-      
-      <div class="export-options">
-        <button class="small-btn" onclick="exportAllData()" style="background:#1e3a5f; flex:1;">💾 Backup All</button>
-        <button class="small-btn" onclick="exportHistory('json')" style="background:#2c3e50; flex:1;">📊 History JSON</button>
-        <button class="small-btn" onclick="exportHistory('csv')" style="background:#2c3e50; flex:1;">📈 History CSV</button>
-      </div>
-      
-      <div class="export-options">
-        <button class="small-btn" onclick="importBackup()" style="background:#4a2c2c; flex:1;">📂 Import Backup</button>
-        <button class="small-btn" onclick="mergeBackup()" style="background:#2c4a2c; flex:1;">🔄 Merge Backup</button>
-      </div>
-      
-      <h3>📋 Templates</h3>
-      <button onclick="createTemplate()">➕ Create Template</button>
-      <button onclick="exportPrompt()" style="background:#1e3a5f;">🔗 Share Templates</button>
-      <div id="templateList">
-        ${data.templates.map(t => `
-          <div class="template-item">
-            <div style="display:flex; justify-content:space-between;">
-              <b>${t.name}</b> <span style="color:#888;">${t.exercises.length} ex</span>
-            </div>
-            <div class="flex-row" style="margin-top:8px;">
-              <button class="small-btn" onclick="startWorkout('${t.id}')">▶️ Start</button>
-              <button class="small-btn" onclick="editTemplate('${t.id}')">✏️ Edit</button>
-              <button class="small-btn" onclick="deleteTemplate('${t.id}')">🗑️</button>
-              <button class="small-btn" onclick="selectForShare('${t.id}')" style="background:#3a2a2a;">🔗 Select</button>
-            </div>
-          </div>
-        `).join("")}
-      </div>
+      `}).join('')}
+      ${data.history.length === 0 ? '<p style="color:#666;">No past workouts yet.</p>' : ''}
+    </div>
+  `;
+}
 
-      <h3 style="margin-top:24px;">📜 Full History (${data.history.length})</h3>
-      <button class="small-btn" onclick="clearAllHistory()" style="background:#5f1f1f;">🗑️ Clear All History</button>
-      <div id="historyList">
-        ${data.history.slice().reverse().map((s, idx) => {
-          const realIndex = data.history.length - 1 - idx;
-          const totalWeight = s.logs.reduce((sum, ex) => 
-            sum + ex.sets.reduce((sSum, set) => sSum + (parseFloat(set.weight) || 0), 0), 0);
-          
-          return `
-          <div class="history-item">
-            <div style="display:flex; justify-content:space-between;">
-              <b>${s.templateName}</b>
-              <span style="color:#aaa;">${new Date(s.date).toLocaleDateString()}</span>
-            </div>
-            <div style="color:#4caf50; font-size:14px;">Total: ${Math.round(totalWeight)} kg</div>
-            <details>
-              <summary>View ${s.logs.length} exercises</summary>
-              ${s.logs.map(l => `
-                <div style="margin:6px 0; background:#2a2a2a; padding:6px; border-radius:6px;">
-                  <b>${l.name}</b><br>
-                  ${l.sets.map((set, setIdx) => `
-                    Set ${setIdx+1}: ${set.weight || '?'} kg × ${set.reps || '?'} reps
-                  `).join('<br>')}
-                </div>
-              `).join('')}
-            </details>
-            <div class="history-actions">
-              <button class="small-btn" onclick="deleteHistoryEntry(${realIndex})" style="background:#7a2a2a;">Delete</button>
-            </div>
-          </div>
-        `}).join('')}
-        ${data.history.length === 0 ? '<p style="color:#666;">No past workouts yet.</p>' : ''}
-      </div>
-    `;
+// ----- REST TIMER -----
+function startTimer(seconds){
+  const timerDiv = document.getElementById("timer");
+  if (!timerDiv) return;
 
-    if (selectedShareIds.length > 0)
+  const endTime = Date.now() + seconds * 1000;
+  clearInterval(timerInterval);
+
+  function update() {
+    const remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+    if (timerDiv) timerDiv.innerText = formatTime(remaining);
+    if (remaining <= 0) {
+      clearInterval(timerInterval);
+      alert("Rest over!");
+    }
+  }
+  update();
+  timerInterval = setInterval(update, 500);
+}
+
+function formatTime(s){
+  const m = Math.floor(s/60);
+  const sec = s%60;
+  return `${m}:${sec<10?"0":""}${sec}`;
+}
+
+// ----- ACTIVE WORKOUT RESTORE -----
+if (data.activeWorkout?.timerEnd) {
+  const remaining = Math.max(0, Math.round((data.activeWorkout.timerEnd - Date.now()) / 1000));
+  if (remaining > 0) startTimer(remaining);
+}
+
+// ----- GLOBAL FUNCTIONS -----
+window.renderHome = renderHome;
+window.save = save;
+
+renderHome();
+})();
+</script>
+</body>
+</html>
