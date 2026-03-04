@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v2.3 (merge + bg timer)</title>
+<title>Workout Tracker · v2.4.1 (countdown + safe upgrade)</title>
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -104,6 +104,17 @@ input, select, textarea {
   margin: 10px 0;
   flex-wrap: wrap;
 }
+.countdown {
+  background: #9c27b0;
+  color: white;
+  padding: 12px;
+  border-radius: 40px;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 10px rgba(156,39,176,0.3);
+}
 </style>
 </head>
 <body>
@@ -111,12 +122,12 @@ input, select, textarea {
 
 <script>
 (function() {
-  const APP_VERSION = '2.3.0'; // merge + background timer + history export
+  const APP_VERSION = '2.4.1'; // added countdown + safe upgrade from old workouts
 
-  // ----- DEFAULT TEMPLATES WITH STABLE IDs (never change) -----
+  // ----- DEFAULT TEMPLATES (unchanged) -----
   const DEFAULT_TEMPLATES = [
     {
-      id: 'default_upper1',        // stable ID
+      id: 'default_upper1',
       name: "Upper 1 – Pull Dominant",
       rest: 120,
       repRange: "8-15",
@@ -181,15 +192,42 @@ input, select, textarea {
         { name: "Goblet squats", sets: 3 },
         { name: "Bulgarian Split Squats", sets: 3 }
       ]
+    },
+        {
+      id: 'default_full1',
+      name: "Full Body Pull Focused",
+      rest: 120,
+      repRange: "8-15",
+      exercises: [
+        { name: "Pull up/down (Wide)", sets: 2 },
+        { name: "Horizontal pull", sets: 2 },
+        { name: "Pull up/down (Close)", sets: 2 },    
+        { name: "Romanian Deadlift", sets: 3 },
+        { name: "Goblet squats", sets: 3 },
+        { name: "Bulgarian Split Squats", sets: 3 }
+      ]
+    },
+        {
+      id: 'default_full2',
+      name: "Full Body Push Focused",
+      rest: 120,
+      repRange: "8-15",
+      exercises: [
+        { name: "Incline push", sets: 2 },
+        { name: "Seated/Standing shoulder press", sets: 2 },
+        { name: "Lateral raises", sets: 2 },      
+        { name: "Romanian Deadlift", sets: 3 },
+        { name: "Goblet squats", sets: 3 },
+        { name: "Bulgarian Split Squats", sets: 3 }
+      ]
     }
   ];
 
-  // ----- Load or initialise data with merging logic -----
+  // ----- Load / merge data (history preserved) -----
   let stored = JSON.parse(localStorage.getItem("workoutApp")) || null;
   let data;
 
   if (!stored) {
-    // Fresh install
     data = {
       templates: [...DEFAULT_TEMPLATES],
       activeWorkout: null,
@@ -197,24 +235,16 @@ input, select, textarea {
       version: APP_VERSION
     };
   } else {
-    // Version mismatch? merge defaults preserving user changes & history
     if (stored.version !== APP_VERSION) {
-      // Start with stored templates (user modified)
       let mergedTemplates = stored.templates || [];
-
-      // Add any default template that is not already present (by stable ID)
       DEFAULT_TEMPLATES.forEach(def => {
         const exists = mergedTemplates.some(t => t.id === def.id);
-        if (!exists) {
-          mergedTemplates.push(def); // new workout added by developer
-        }
+        if (!exists) mergedTemplates.push(def);
       });
-
-      // Preserve everything else
       data = {
         templates: mergedTemplates,
         activeWorkout: stored.activeWorkout || null,
-        history: stored.history || [],        // keep all history
+        history: stored.history || [],
         version: APP_VERSION
       };
     } else {
@@ -222,17 +252,32 @@ input, select, textarea {
     }
   }
 
-  // Ensure every template has an id (legacy user-created might lack)
+  // Ensure every template has an id
   data.templates = data.templates.map(t => ({
     id: t.id || 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2,8),
     ...t
   }));
 
+  // ----- Migrate old active workout (v2.3) to new format (free order) -----
+  if (data.activeWorkout && typeof data.activeWorkout.currentExercise === 'number' && data.activeWorkout.currentView === undefined) {
+    // User was in the middle of a linear workout – move them to the dashboard of that same workout
+    data.activeWorkout.currentView = 'dashboard'; // start from dashboard (safer than forcing a specific exercise)
+    delete data.activeWorkout.currentExercise;
+    // Ensure logs exist (they should)
+    if (!data.activeWorkout.logs) {
+      // If logs missing (shouldn't happen), rebuild from exercises
+      data.activeWorkout.logs = data.activeWorkout.exercises.map(e => ({
+        name: e.name,
+        sets: Array.from({ length: e.sets }, () => ({ weight: "", reps: "" }))
+      }));
+    }
+  }
+
   function save() {
     localStorage.setItem("workoutApp", JSON.stringify(data));
   }
 
-  // ----- Timer background handling -----
+  // ----- Timer (unchanged) -----
   let timerInterval = null;
 
   function clearTimer() {
@@ -247,7 +292,7 @@ input, select, textarea {
     const endTime = Date.now() + seconds * 1000;
     data.activeWorkout.timerEnd = endTime;
     save();
-    updateTimerDisplay(); // immediate update
+    updateTimerDisplay();
     clearTimer();
     timerInterval = setInterval(() => {
       if (!data.activeWorkout) {
@@ -285,7 +330,6 @@ input, select, textarea {
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
   }
 
-  // Resume timer on page load / visibility change
   function resumeTimerIfNeeded() {
     if (data.activeWorkout && data.activeWorkout.timerEnd) {
       const remaining = Math.floor((data.activeWorkout.timerEnd - Date.now()) / 1000);
@@ -303,11 +347,11 @@ input, select, textarea {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       resumeTimerIfNeeded();
-      if (data.activeWorkout) renderWorkout(); // refresh view
+      if (data.activeWorkout) renderWorkout();
     }
   });
 
-  // ----- SHARE / IMPORT (templates) -----
+  // ----- SHARE / IMPORT (unchanged) -----
   function parseShareLink() {
     const hash = window.location.hash.substring(1);
     if (!hash) return;
@@ -327,10 +371,28 @@ input, select, textarea {
   }
   parseShareLink();
 
-  // ----- RENDER HOME with history export/import -----
+  // ----- Helper to count logged sets -----
+  function countLoggedSets(exerciseLog) {
+    return exerciseLog.sets.filter(set => set.reps && set.reps.toString().trim() !== '').length;
+  }
+
+  // ----- RENDER HOME with countdown -----
   function renderHome() {
     const app = document.getElementById("app");
+
+    // Countdown to May 1st
+    const now = new Date();
+    let target = new Date(now.getFullYear(), 4, 1); // May is month 4 (0-indexed)
+    if (now > target) {
+      target = new Date(now.getFullYear() + 1, 4, 1);
+    }
+    const diffMs = target - now;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until May 1 ❤️`;
+
     app.innerHTML = `
+      <div class="countdown">${countdownText}</div>
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h2>📋 Templates</h2>
         <span class="version-badge">v${APP_VERSION}</span>
@@ -411,7 +473,7 @@ input, select, textarea {
     }
   }
 
-  // ----- HISTORY EXPORT / IMPORT -----
+  // ----- HISTORY EXPORT/IMPORT (unchanged) -----
   window.exportHistory = () => {
     const historyData = data.history.map(entry => ({
       date: entry.date,
@@ -441,7 +503,6 @@ input, select, textarea {
         try {
           const imported = JSON.parse(ev.target.result);
           if (!Array.isArray(imported)) throw new Error('Not an array');
-          // optional: validate structure
           const safe = imported.filter(entry => entry.templateName && entry.logs && Array.isArray(entry.logs));
           if (safe.length === 0) return alert('No valid history entries found.');
           data.history = [...data.history, ...safe];
@@ -525,7 +586,7 @@ input, select, textarea {
     }
   };
 
-  // ----- TEMPLATE CRUD -----
+  // ----- TEMPLATE CRUD (unchanged) -----
   window.createTemplate = () => {
     const name = prompt("Template Name:");
     if(!name) return;
@@ -552,7 +613,7 @@ input, select, textarea {
     return data.templates.findIndex(t => t.id === id);
   }
 
-  // ----- EDIT TEMPLATE (with drag) -----
+  // ----- EDIT TEMPLATE (unchanged) -----
   window.editTemplate = (id) => {
     const i = findTemplateIndex(id);
     if (i === -1) return renderHome();
@@ -584,7 +645,6 @@ input, select, textarea {
       <button onclick="addExercise('${id}')">+ Add Exercise</button>
     `;
 
-    // drag & drop
     const list = document.getElementById('exerciseList');
     let draggedItem = null;
 
@@ -595,12 +655,10 @@ input, select, textarea {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', card.dataset.index);
       });
-
       card.addEventListener('dragend', () => {
         card.classList.remove('dragging');
         draggedItem = null;
       });
-
       card.addEventListener('dragover', (e) => e.preventDefault());
       card.addEventListener('drop', (e) => {
         e.preventDefault();
@@ -657,87 +715,114 @@ input, select, textarea {
     editTemplate(id);
   };
 
-  // ----- WORKOUT -----
+  // ----- NEW WORKOUT FLOW (free order) -----
   window.startWorkout = (id) => {
     const i = findTemplateIndex(id);
-    if (i===-1) return;
+    if (i === -1) return;
     const template = JSON.parse(JSON.stringify(data.templates[i]));
-    template.currentExercise = 0;
-    template.logs = template.exercises.map(e=>({
+    template.logs = template.exercises.map(e => ({
       name: e.name,
-      sets: Array.from({length: e.sets}, () => ({weight:"",reps:""}))
+      sets: Array.from({ length: e.sets }, () => ({ weight: "", reps: "" }))
     }));
     template.startedAt = new Date().toISOString();
     template.templateId = id;
-    delete template.timerEnd; // fresh start
+    delete template.timerEnd;
+    template.currentView = 'dashboard';
     data.activeWorkout = template;
     save();
     renderWorkout();
   };
 
   function renderWorkout() {
-    const w = data.activeWorkout;
-    if(!w) return renderHome();
+    if (!data.activeWorkout) return renderHome();
+    if (data.activeWorkout.currentView === 'dashboard') {
+      renderWorkoutDashboard();
+    } else if (typeof data.activeWorkout.currentView === 'number') {
+      renderExerciseDetail(data.activeWorkout.currentView);
+    } else {
+      renderWorkoutDashboard();
+    }
+  }
 
-    const exercise = w.logs[w.currentExercise];
+  function renderWorkoutDashboard() {
+    const w = data.activeWorkout;
     const app = document.getElementById("app");
 
     app.innerHTML = `
       <button onclick="endWorkout()">🏁 End Workout</button>
-      <h2>${exercise.name}</h2>
-      ${exercise.sets.map((set,si)=>`
-        <div class="exercise-card">
-          <b>Set ${si+1}</b><br>
-          <input placeholder="Weight (kg)" value="${set.weight || ''}" 
-            onchange="updateSet(${si},'weight',this.value)">
-          <input placeholder="Reps" value="${set.reps || ''}" 
-            onchange="updateSet(${si},'reps',this.value)">
-          <button class="small-btn" style="background:#2e7d32;" onclick="completeSet(${si})">✅ Log & Rest</button>
-        </div>
-      `).join("")}
+      <h2>${w.name} · Dashboard</h2>
       <div class="timer" id="timer">${formatTime(w.rest)}</div>
-      <button onclick="nextExercise()">⏩ Next Exercise</button>
+      <div style="margin-top:20px;">
+        ${w.logs.map((log, idx) => {
+          const logged = countLoggedSets(log);
+          const total = log.sets.length;
+          return `
+            <div class="exercise-card" style="cursor:pointer;" onclick="doExercise(${idx})">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <b>${log.name}</b>
+                <span style="color:#4caf50;">${logged}/${total} sets</span>
+              </div>
+              <button class="small-btn" style="margin-top:8px; background:#2a5f2a;">▶️ Do Exercise</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
     `;
     resumeTimerIfNeeded();
   }
 
-  window.updateSet = (si,key,val) => {
+  function renderExerciseDetail(exIndex) {
     const w = data.activeWorkout;
-    w.logs[w.currentExercise].sets[si][key] = val;
+    const exercise = w.logs[exIndex];
+    const app = document.getElementById("app");
+
+    app.innerHTML = `
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button class="small-btn" onclick="goToDashboard()">← Back to List</button>
+        <button class="small-btn" onclick="endWorkout()" style="background:#7a2a2a;">🏁 End</button>
+      </div>
+      <h2>${exercise.name}</h2>
+      ${exercise.sets.map((set, si) => `
+        <div class="exercise-card">
+          <b>Set ${si+1}</b><br>
+          <input placeholder="Weight (kg)" value="${set.weight || ''}" 
+            onchange="updateSet(${exIndex}, ${si}, 'weight', this.value)">
+          <input placeholder="Reps" value="${set.reps || ''}" 
+            onchange="updateSet(${exIndex}, ${si}, 'reps', this.value)">
+          <button class="small-btn" style="background:#2e7d32;" onclick="completeSet(${exIndex}, ${si})">✅ Log & Rest</button>
+        </div>
+      `).join("")}
+      <div class="timer" id="timer">${formatTime(w.rest)}</div>
+    `;
+    resumeTimerIfNeeded();
+  }
+
+  window.doExercise = (exIndex) => {
+    data.activeWorkout.currentView = exIndex;
+    save();
+    renderExerciseDetail(exIndex);
+  };
+
+  window.goToDashboard = () => {
+    data.activeWorkout.currentView = 'dashboard';
+    save();
+    renderWorkoutDashboard();
+  };
+
+  window.updateSet = (exIndex, setIndex, field, value) => {
+    const w = data.activeWorkout;
+    if (!w) return;
+    w.logs[exIndex].sets[setIndex][field] = value;
     save();
   };
 
-  window.completeSet = (si) => {
+  window.completeSet = (exIndex, setIndex) => {
     const w = data.activeWorkout;
-    const set = w.logs[w.currentExercise].sets[si];
-    if(parseInt(set.reps) > 15){
+    const set = w.logs[exIndex].sets[setIndex];
+    if (parseInt(set.reps) > 15) {
       alert("More than 15 reps. Consider increasing weight. Logged anyway.");
     }
     startTimer(w.rest);
-  };
-
-  window.nextExercise = () => {
-    const w = data.activeWorkout;
-    if(w.currentExercise < w.logs.length-1){
-      w.currentExercise++;
-      delete w.timerEnd; // clear rest timer
-      clearTimer();
-      save();
-      renderWorkout();
-    } else {
-      const historyEntry = {
-        date: new Date().toISOString(),
-        templateName: w.name,
-        logs: w.logs,
-        id: w.templateId
-      };
-      data.history.push(historyEntry);
-      data.activeWorkout = null;
-      clearTimer();
-      save();
-      alert("Workout complete! Saved to history.");
-      renderHome();
-    }
   };
 
   window.endWorkout = () => {
@@ -762,7 +847,7 @@ input, select, textarea {
   window.renderHome = renderHome;
   window.save = save;
 
-  // Initial render & timer resume
+  // Initial render
   renderHome();
   resumeTimerIfNeeded();
 })();
