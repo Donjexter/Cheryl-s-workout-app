@@ -391,8 +391,8 @@
           return `
             <div class="person-card">
               <b>${stat.person}</b><br>
-              Start: ${stat.first.weight} kg (${new Date(stat.first.date).toLocaleDateString()})<br>
-              Now: ${stat.last.weight} kg (${new Date(stat.last.date).toLocaleDateString()})<br>
+              Start: ${stat.first.weight} kg <br>
+              Now: ${stat.last.weight} kg <br>
               <span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span>
             </div>
           `;
@@ -437,12 +437,7 @@
           <button class="small-btn" onclick="copyProgressSummary()" style="background:var(--accent);">📤 Copy Summary</button>
         </div>
       
-      <!-- Theme Picker -->
-      <div class="theme-picker">
-        <button class="small-btn" onclick="setTheme('dark')">🌙 Dark</button>
-        <button class="small-btn" onclick="setTheme('light')">☀️ Light</button>
-        <button class="small-btn" onclick="setTheme('cute')">🌸 Cute</button>
-      </div>
+
       
         <div style="margin-top:24px;">
           <h4>Past entries</h4>
@@ -455,7 +450,12 @@
           ${data.bodyWeight.length === 0 ? '<p style="color:var(--text-secondary);">No weight logged yet.</p>' : ''}
         </div>
       </div>
-
+      <!-- Theme Picker -->
+      <div class="theme-picker">
+        <button class="small-btn" onclick="setTheme('dark')">🌙 Dark</button>
+        <button class="small-btn" onclick="setTheme('light')">☀️ Light</button>
+        <button class="small-btn" onclick="setTheme('cute')">🌸 Cute</button>
+      </div>
       <h3 style="margin-top:24px;">📜 Full History (${data.history.length})</h3>
       <div class="import-export-bar">
         <button class="small-btn" onclick="exportHistory()" style="background:var(--surface-light);">📤 Export History</button>
