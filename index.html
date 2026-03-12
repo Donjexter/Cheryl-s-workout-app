@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v2.8.1 (Edit history + Quick Workout fixes)</title>
+<title>Workout Tracker · v2.9.0 (Default cute + intuitive dropdown + edit workout name)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) ----- */
 
@@ -212,7 +212,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '2.8.1'; // Edit history + Quick Workout (mobile fixes)
+  const APP_VERSION = '2.9.0'; // Default cute + intuitive dropdown + edit workout name
 
   // ----- DEFAULT TEMPLATES (full list) -----
   const DEFAULT_TEMPLATES = [
@@ -223,7 +223,7 @@
       repRange: "8-15",
       exercises: [
         { name: "Vertical Pull (Wide Grip)", sets: 2 },
-        { name: "Horizontal Row", sets: 2 },
+        { name: "Horizontal Pull", sets: 2 },
         { name: "Vertical Pull (Close / Neutral)", sets: 2 },
         { name: "Incline Press (60°)", sets: 2 },
         { name: "Lateral Raises", sets: 2 },
@@ -251,8 +251,8 @@
         { name: "Overhead Press", sets: 2 },
         { name: "Incline Press (60°)", sets: 2 },
         { name: "Lateral Raises", sets: 2 },
-        { name: "Horizontal Row (Different Variation)", sets: 2 },
-        { name: "Vertical Pull (Neutral or Supinated)", sets: 2 },
+        { name: "Horizontal Pull", sets: 2 },
+        { name: "Vertical Pull", sets: 2 },
         { name: "Optional Arms", sets: 2 }
       ]
     },
@@ -262,10 +262,10 @@
       rest: 120,
       repRange: "8-15",
       exercises: [
-        { name: "Romanian Deadlift (Primary Hinge)", sets: 3 },
-        { name: "Hip Thrust (Heavier Than Lower 1)", sets: 3 },
+        { name: "Romanian Deadlift", sets: 3 },
+        { name: "Hip Thrust", sets: 3 },
         { name: "Glute Dominant Squat", sets: 3 },
-        { name: "Bulgarian Split Squats (Longer Stride)", sets: 3 }
+        { name: "Bulgarian Split Squats", sets: 3 }
       ]
     },
     {
@@ -276,8 +276,8 @@
       exercises: [
         { name: "Pull up/down", sets: 2 },
         { name: "Incline push", sets: 2 },
-        { name: "Horizontal pull", sets: 2 },
-        { name: "Lateral raises", sets: 2 },      
+        { name: "Horizontal Pull", sets: 2 },
+        { name: "Lateral Raises", sets: 2 },      
         { name: "Romanian Deadlift", sets: 3 },
         { name: "Goblet squats", sets: 3 },
         { name: "Bulgarian Split Squats", sets: 3 }
@@ -290,7 +290,7 @@
       repRange: "8-15",
       exercises: [
         { name: "Pull up/down (Wide)", sets: 2 },
-        { name: "Horizontal pull", sets: 2 },
+        { name: "Horizontal Pull", sets: 2 },
         { name: "Pull up/down (Close)", sets: 2 },    
         { name: "Romanian Deadlift", sets: 3 },
         { name: "Goblet squats", sets: 3 },
@@ -305,7 +305,7 @@
       exercises: [
         { name: "Incline push", sets: 2 },
         { name: "Seated/Standing shoulder press", sets: 2 },
-        { name: "Lateral raises", sets: 2 },      
+        { name: "Lateral Raises", sets: 2 },      
         { name: "Romanian Deadlift", sets: 3 },
         { name: "Goblet squats", sets: 3 },
         { name: "Bulgarian Split Squats", sets: 3 }
@@ -323,7 +323,7 @@
       activeWorkout: null,
       history: [],
       bodyWeight: [],
-      theme: 'cute',
+      theme: 'cute',               // Default to cute
       version: APP_VERSION
     };
   } else {
@@ -338,7 +338,7 @@
       activeWorkout: stored.activeWorkout || null,
       history: stored.history || [],
       bodyWeight: stored.bodyWeight || [],
-      theme: stored.theme || 'dark',
+      theme: stored.theme || 'cute',   // Default to cute
       version: APP_VERSION
     };
   }
@@ -543,7 +543,7 @@
     else renderHome();
   };
 
-  // ----- TEMPLATE CRUD (unchanged) -----
+  // ----- TEMPLATE CRUD (with rename capability) -----
   window.createTemplate = () => {
     const name = prompt("Template Name:");
     if(!name) return;
@@ -570,6 +570,18 @@
     return data.templates.findIndex(t => t.id === id);
   }
 
+  // Rename template
+  window.renameTemplate = (id) => {
+    const i = findTemplateIndex(id);
+    if (i === -1) return;
+    const newName = prompt("New template name:", data.templates[i].name);
+    if (newName && newName.trim() !== '') {
+      data.templates[i].name = newName.trim();
+      save();
+      editTemplate(id); // refresh view
+    }
+  };
+
   window.editTemplate = (id) => {
     const i = findTemplateIndex(id);
     if (i === -1) return renderHome();
@@ -579,7 +591,7 @@
 
     app.innerHTML = `
       <button onclick="renderHome()">← Back</button>
-      <h2>${template.name}</h2>
+      <h2>${template.name} <button class="small-btn" onclick="renameTemplate('${id}')">✏️ Rename</button></h2>
       <label>Rest (seconds)</label>
       <input value="${template.rest}" onchange="updateRest('${id}',this.value)">
       <h3>Exercises (drag handle ⋮⋮ to reorder)</h3>
@@ -671,7 +683,7 @@
     editTemplate(id);
   };
 
-  // ----- NEW FEATURES: Quick Workout & History Editing (with fixes) -----
+  // ----- NEW FEATURES: Quick Workout & History Editing (with intuitive dropdown) -----
 
   // Helper to get all unique exercise names from templates and history
   function getAllExerciseNames() {
@@ -704,29 +716,50 @@
   function renderAddExercise() {
     const app = document.getElementById("app");
     const exerciseNames = getAllExerciseNames();
-    const datalistId = 'exercise-datalist-' + Date.now();
     app.innerHTML = `
       <button onclick="goToDashboard()">← Back to Workout</button>
       <h2>Add Exercise</h2>
-      <input list="${datalistId}" id="new-exercise-name" placeholder="Exercise name" autocomplete="off">
-      <datalist id="${datalistId}">
-        ${exerciseNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">`).join('')}
-      </datalist>
-      <label>Number of sets:</label>
+      <label for="exercise-select">Choose an exercise:</label>
+      <select id="exercise-select" onchange="toggleNewExerciseInput()">
+        <option value="">-- Select --</option>
+        ${exerciseNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">${name}</option>`).join('')}
+        <option value="__new__">➕ Add new exercise...</option>
+      </select>
+      <div id="new-exercise-container" style="display: none; margin-top: 10px;">
+        <label for="new-exercise-name">New exercise name:</label>
+        <input type="text" id="new-exercise-name" placeholder="e.g. Dumbbell Curl">
+      </div>
+      <label for="new-exercise-sets">Number of sets:</label>
       <input type="number" id="new-exercise-sets" value="1" min="1" step="1">
       <button onclick="addExerciseToQuickWorkout()">Add Exercise</button>
     `;
   }
 
+  window.toggleNewExerciseInput = function() {
+    const select = document.getElementById('exercise-select');
+    const container = document.getElementById('new-exercise-container');
+    container.style.display = select.value === '__new__' ? 'block' : 'none';
+  };
+
   window.addExerciseToQuickWorkout = function() {
-    const nameInput = document.getElementById('new-exercise-name');
+    const select = document.getElementById('exercise-select');
+    const newNameInput = document.getElementById('new-exercise-name');
     const setsInput = document.getElementById('new-exercise-sets');
-    const name = nameInput.value.trim();
-    const sets = parseInt(setsInput.value) || 1;
-    if (!name) {
-      alert('Please enter an exercise name');
-      return;
+    let name;
+    if (select.value === '__new__') {
+      name = newNameInput.value.trim();
+      if (!name) {
+        alert('Please enter a name for the new exercise.');
+        return;
+      }
+    } else {
+      name = select.value;
+      if (!name) {
+        alert('Please select an exercise.');
+        return;
+      }
     }
+    const sets = parseInt(setsInput.value) || 1;
     const w = data.activeWorkout;
     if (!w) return;
     w.logs.push({
@@ -744,7 +777,7 @@
     const workoutCopy = {
       ...entry,
       id: entry.id || 'history-edit',
-      name: entry.templateName,          // <-- FIX: ensure name exists
+      name: entry.templateName,          // <-- ensure name exists
       startedAt: new Date().toISOString(),
       logs: JSON.parse(JSON.stringify(entry.logs)),
       editingHistoryIndex: index,
@@ -755,6 +788,18 @@
     data.activeWorkout = workoutCopy;
     save();
     renderWorkout();
+  };
+
+  // Rename active workout (for both template-based and history editing)
+  window.renameWorkout = function() {
+    const w = data.activeWorkout;
+    if (!w) return;
+    const newName = prompt("Enter new workout name:", w.name);
+    if (newName && newName.trim() !== '') {
+      w.name = newName.trim();
+      save();
+      renderWorkoutDashboard(); // refresh header
+    }
   };
 
   // Rename exercise inside active workout
@@ -796,7 +841,7 @@
     }
   };
 
-  // Unified workout finish handler (replaces old endWorkout logic)
+  // Unified workout finish handler (saves name change for history edits)
   window.finishWorkout = function(saveToHistory = true) {
     if (!data.activeWorkout) return renderHome();
     const w = data.activeWorkout;
@@ -805,6 +850,7 @@
       const original = data.history[index];
       data.history[index] = {
         ...original,
+        templateName: w.name,          // <-- save renamed workout name
         logs: w.logs
       };
       data.activeWorkout = null;
@@ -902,7 +948,7 @@
              <button onclick="cancelEdit()">✖ Cancel</button>`
           : `<button onclick="endWorkout()">🏁 End Workout</button>`}
       </div>
-      <h2>${w.name || 'Workout'} · Dashboard</h2>
+      <h2>${w.name || 'Workout'} <button class="small-btn" onclick="renameWorkout()">✏️ Rename</button></h2>
       <div class="timer" id="timer">${formatTime(w.rest)}</div>
       <div style="margin-top:20px;">
         ${w.logs.map((log, idx) => {
