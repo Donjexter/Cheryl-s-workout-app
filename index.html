@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v2.8.0 (Edit history + Quick Workout)</title>
+<title>Workout Tracker · v2.8.1 (Edit history + Quick Workout fixes)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) ----- */
 
@@ -36,6 +36,8 @@
     padding: 20px;
     max-width: 600px;
     margin: 0 auto;
+    box-sizing: border-box;
+    width: 100%;
   }
   button {
     padding: 10px;
@@ -48,6 +50,7 @@
     font-weight: 500;
     cursor: pointer;
     transition: background 0.2s;
+    box-sizing: border-box;
   }
   button:hover { background: var(--border); }
   button.small-btn {
@@ -69,6 +72,8 @@
     width: 100%;
     background: var(--surface);
     color: var(--text);
+    box-sizing: border-box;
+    max-width: 100%;
   }
   .exercise-card {
     background: var(--surface);
@@ -110,11 +115,13 @@
     padding: 12px;
     margin: 10px 0;
     border-radius: 10px;
+    word-wrap: break-word;
   }
   .history-actions {
     display: flex;
     gap: 8px;
     margin-top: 8px;
+    flex-wrap: wrap;
   }
   .version-badge {
     background: var(--surface-light);
@@ -146,6 +153,7 @@
     gap: 8px;
     margin: 20px 0;
     justify-content: center;
+    flex-wrap: wrap;
   }
   .theme-picker button {
     width: auto;
@@ -190,6 +198,7 @@
     display: flex;
     gap: 8px;
     border: 1px solid var(--border);
+    flex-wrap: wrap;
   }
   .past-hint {
     font-size: 0.8rem;
@@ -203,7 +212,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '2.8.0'; // Edit history + Quick Workout
+  const APP_VERSION = '2.8.1'; // Edit history + Quick Workout (mobile fixes)
 
   // ----- DEFAULT TEMPLATES (full list) -----
   const DEFAULT_TEMPLATES = [
@@ -314,7 +323,7 @@
       activeWorkout: null,
       history: [],
       bodyWeight: [],
-      theme: 'dark',
+      theme: 'cute',
       version: APP_VERSION
     };
   } else {
@@ -409,6 +418,7 @@
     }
   }
   function formatTime(s) {
+    if (typeof s !== 'number' || isNaN(s)) return '0:00';
     const m = Math.floor(s / 60);
     const sec = s % 60;
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
@@ -661,7 +671,7 @@
     editTemplate(id);
   };
 
-  // ----- NEW FEATURES: Quick Workout & History Editing -----
+  // ----- NEW FEATURES: Quick Workout & History Editing (with fixes) -----
 
   // Helper to get all unique exercise names from templates and history
   function getAllExerciseNames() {
@@ -727,13 +737,14 @@
     goToDashboard();
   };
 
-  // Edit history entry
+  // Edit history entry (FIX: set name from templateName)
   window.editHistoryEntry = function(index) {
     const entry = data.history[index];
     if (!entry) return;
     const workoutCopy = {
       ...entry,
       id: entry.id || 'history-edit',
+      name: entry.templateName,          // <-- FIX: ensure name exists
       startedAt: new Date().toISOString(),
       logs: JSON.parse(JSON.stringify(entry.logs)),
       editingHistoryIndex: index,
@@ -885,13 +896,13 @@
     const isHistoryEdit = w.editingHistoryIndex !== undefined;
     const app = document.getElementById("app");
     app.innerHTML = `
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
         ${isHistoryEdit 
           ? `<button onclick="finishWorkout(true)">💾 Save Changes</button>
              <button onclick="cancelEdit()">✖ Cancel</button>`
           : `<button onclick="endWorkout()">🏁 End Workout</button>`}
       </div>
-      <h2>${w.name} · Dashboard</h2>
+      <h2>${w.name || 'Workout'} · Dashboard</h2>
       <div class="timer" id="timer">${formatTime(w.rest)}</div>
       <div style="margin-top:20px;">
         ${w.logs.map((log, idx) => {
@@ -938,7 +949,7 @@
     const pastHint = getPastPerformance(exercise.name);
 
     app.innerHTML = `
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
         <button class="small-btn" onclick="goToDashboard()">← Back to List</button>
         <button class="small-btn btn-danger" onclick="endWorkout()">🏁 End</button>
       </div>
