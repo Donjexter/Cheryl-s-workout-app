@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v2.7.0 (Not Cheryl + past hints)</title>
+<title>Workout Tracker · v2.8.0 (Edit history + Quick Workout)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) ----- */
 
@@ -203,7 +203,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '2.7.0'; // Not Cheryl theme + past hints
+  const APP_VERSION = '2.8.0'; // Edit history + Quick Workout
 
   // ----- DEFAULT TEMPLATES (full list) -----
   const DEFAULT_TEMPLATES = [
@@ -661,7 +661,196 @@
     editTemplate(id);
   };
 
-  // ----- WORKOUT FLOW with past hints -----
+  // ----- NEW FEATURES: Quick Workout & History Editing -----
+
+  // Helper to get all unique exercise names from templates and history
+  function getAllExerciseNames() {
+    const names = new Set();
+    data.templates.forEach(t => t.exercises.forEach(e => names.add(e.name)));
+    data.history.forEach(h => h.logs.forEach(l => names.add(l.name)));
+    return Array.from(names).sort((a,b) => a.localeCompare(b, undefined, {sensitivity: 'base'}));
+  }
+
+  // Quick Workout
+  window.startQuickWorkout = function() {
+    data.activeWorkout = {
+      id: 'quick-' + Date.now(),
+      name: 'Quick Workout',
+      rest: 120,
+      repRange: '8-15',
+      logs: [],
+      startedAt: new Date().toISOString(),
+      isQuickWorkout: true,
+      currentView: 'dashboard'
+    };
+    save();
+    renderWorkout();
+  };
+
+  window.showAddExercise = function() {
+    renderAddExercise();
+  };
+
+  function renderAddExercise() {
+    const app = document.getElementById("app");
+    const exerciseNames = getAllExerciseNames();
+    const datalistId = 'exercise-datalist-' + Date.now();
+    app.innerHTML = `
+      <button onclick="goToDashboard()">← Back to Workout</button>
+      <h2>Add Exercise</h2>
+      <input list="${datalistId}" id="new-exercise-name" placeholder="Exercise name" autocomplete="off">
+      <datalist id="${datalistId}">
+        ${exerciseNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">`).join('')}
+      </datalist>
+      <label>Number of sets:</label>
+      <input type="number" id="new-exercise-sets" value="1" min="1" step="1">
+      <button onclick="addExerciseToQuickWorkout()">Add Exercise</button>
+    `;
+  }
+
+  window.addExerciseToQuickWorkout = function() {
+    const nameInput = document.getElementById('new-exercise-name');
+    const setsInput = document.getElementById('new-exercise-sets');
+    const name = nameInput.value.trim();
+    const sets = parseInt(setsInput.value) || 1;
+    if (!name) {
+      alert('Please enter an exercise name');
+      return;
+    }
+    const w = data.activeWorkout;
+    if (!w) return;
+    w.logs.push({
+      name: name,
+      sets: Array.from({ length: sets }, () => ({ weight: "", reps: "" }))
+    });
+    save();
+    goToDashboard();
+  };
+
+  // Edit history entry
+  window.editHistoryEntry = function(index) {
+    const entry = data.history[index];
+    if (!entry) return;
+    const workoutCopy = {
+      ...entry,
+      id: entry.id || 'history-edit',
+      startedAt: new Date().toISOString(),
+      logs: JSON.parse(JSON.stringify(entry.logs)),
+      editingHistoryIndex: index,
+      currentView: 'dashboard',
+      rest: 120,
+      repRange: '8-15'
+    };
+    data.activeWorkout = workoutCopy;
+    save();
+    renderWorkout();
+  };
+
+  // Rename exercise inside active workout
+  window.renameExercise = function(exIndex) {
+    const w = data.activeWorkout;
+    if (!w) return;
+    const newName = prompt("Enter new exercise name:", w.logs[exIndex].name);
+    if (newName && newName.trim() !== '') {
+      w.logs[exIndex].name = newName.trim();
+      save();
+      if (typeof data.activeWorkout.currentView === 'number') {
+        renderExerciseDetail(data.activeWorkout.currentView);
+      } else {
+        renderWorkoutDashboard();
+      }
+    }
+  };
+
+  // Add a set to an exercise
+  window.addSet = function(exIndex) {
+    const w = data.activeWorkout;
+    if (!w) return;
+    w.logs[exIndex].sets.push({ weight: "", reps: "" });
+    save();
+    renderExerciseDetail(exIndex);
+  };
+
+  // Remove last set from an exercise
+  window.removeSet = function(exIndex) {
+    const w = data.activeWorkout;
+    if (!w) return;
+    const sets = w.logs[exIndex].sets;
+    if (sets.length > 1) {
+      sets.pop();
+      save();
+      renderExerciseDetail(exIndex);
+    } else {
+      alert("Cannot remove the only set. Delete the exercise instead?");
+    }
+  };
+
+  // Unified workout finish handler (replaces old endWorkout logic)
+  window.finishWorkout = function(saveToHistory = true) {
+    if (!data.activeWorkout) return renderHome();
+    const w = data.activeWorkout;
+    if (w.editingHistoryIndex !== undefined) {
+      const index = w.editingHistoryIndex;
+      const original = data.history[index];
+      data.history[index] = {
+        ...original,
+        logs: w.logs
+      };
+      data.activeWorkout = null;
+      clearTimer();
+      save();
+      renderHome();
+    } else {
+      if (saveToHistory) {
+        data.history.push({
+          date: new Date().toISOString(),
+          templateName: w.name,
+          logs: w.logs,
+          id: w.id || w.templateId
+        });
+      }
+      data.activeWorkout = null;
+      clearTimer();
+      save();
+      renderHome();
+    }
+  };
+
+  // Override original endWorkout to use new unified logic with confirmation
+  window.endWorkout = function() {
+    if (!data.activeWorkout) return renderHome();
+    const w = data.activeWorkout;
+    if (w.editingHistoryIndex !== undefined) {
+      if (confirm('Save changes to history?')) {
+        finishWorkout(true);
+      } else {
+        data.activeWorkout = null;
+        clearTimer();
+        save();
+        renderHome();
+      }
+    } else {
+      if (confirm('Save current progress to history?')) {
+        finishWorkout(true);
+      } else {
+        data.activeWorkout = null;
+        clearTimer();
+        save();
+        renderHome();
+      }
+    }
+  };
+
+  window.cancelEdit = function() {
+    if (confirm('Discard changes?')) {
+      data.activeWorkout = null;
+      clearTimer();
+      save();
+      renderHome();
+    }
+  };
+
+  // ----- WORKOUT FLOW with past hints (modified) -----
   window.startWorkout = (id) => {
     const i = findTemplateIndex(id);
     if (i === -1) return;
@@ -693,9 +882,15 @@
 
   function renderWorkoutDashboard() {
     const w = data.activeWorkout;
+    const isHistoryEdit = w.editingHistoryIndex !== undefined;
     const app = document.getElementById("app");
     app.innerHTML = `
-      <button onclick="endWorkout()">🏁 End Workout</button>
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        ${isHistoryEdit 
+          ? `<button onclick="finishWorkout(true)">💾 Save Changes</button>
+             <button onclick="cancelEdit()">✖ Cancel</button>`
+          : `<button onclick="endWorkout()">🏁 End Workout</button>`}
+      </div>
       <h2>${w.name} · Dashboard</h2>
       <div class="timer" id="timer">${formatTime(w.rest)}</div>
       <div style="margin-top:20px;">
@@ -713,26 +908,25 @@
           `;
         }).join('')}
       </div>
+      ${w.isQuickWorkout ? '<button onclick="showAddExercise()">+ Add Exercise</button>' : ''}
     `;
     resumeTimerIfNeeded();
   }
 
   // Helper to get last few logged sets for an exercise from history
   function getPastPerformance(exerciseName) {
-    // Go through history (most recent first) and collect up to 3 entries
     const past = [];
     for (let i = data.history.length - 1; i >= 0; i--) {
       const workout = data.history[i];
       const exLog = workout.logs.find(l => l.name === exerciseName);
       if (exLog) {
-        // Add each completed set (weight & reps) from that exercise
         exLog.sets.forEach(set => {
           if (set.weight && set.reps) {
             past.push(`${set.weight}kg × ${set.reps}`);
           }
         });
       }
-      if (past.length >= 6) break; // limit to 6 examples
+      if (past.length >= 6) break;
     }
     return past.slice(0, 6).join(', ');
   }
@@ -741,8 +935,6 @@
     const w = data.activeWorkout;
     const exercise = w.logs[exIndex];
     const app = document.getElementById("app");
-
-    // Get past performance for this exercise
     const pastHint = getPastPerformance(exercise.name);
 
     app.innerHTML = `
@@ -750,7 +942,7 @@
         <button class="small-btn" onclick="goToDashboard()">← Back to List</button>
         <button class="small-btn btn-danger" onclick="endWorkout()">🏁 End</button>
       </div>
-      <h2>${exercise.name}</h2>
+      <h2>${exercise.name} <button class="small-btn" onclick="renameExercise(${exIndex})">✏️ Rename</button></h2>
       ${pastHint ? `<div class="past-hint">📋 Past: ${pastHint}</div>` : ''}
       ${exercise.sets.map((set, si) => `
         <div class="exercise-card">
@@ -762,6 +954,10 @@
           <button class="small-btn" style="background:var(--accent);" onclick="completeSet(${exIndex}, ${si})">✅ Log & Rest</button>
         </div>
       `).join("")}
+      <div class="flex-row">
+        <button class="small-btn" onclick="addSet(${exIndex})">➕ Add Set</button>
+        <button class="small-btn" onclick="removeSet(${exIndex})">➖ Remove Set</button>
+      </div>
       <div class="timer" id="timer">${formatTime(w.rest)}</div>
     `;
     resumeTimerIfNeeded();
@@ -795,25 +991,7 @@
     startTimer(w.rest);
   };
 
-  window.endWorkout = () => {
-    if (data.activeWorkout) {
-      if (confirm('Save current progress to history?')) {
-        const w = data.activeWorkout;
-        data.history.push({
-          date: new Date().toISOString(),
-          templateName: w.name,
-          logs: w.logs,
-          id: w.templateId
-        });
-      }
-    }
-    data.activeWorkout = null;
-    clearTimer();
-    save();
-    renderHome();
-  };
-
-  // ----- HISTORY (unchanged) -----
+  // ----- HISTORY (unchanged except added Edit button) -----
   window.exportHistory = () => {
     const historyData = data.history.map(entry => ({
       date: entry.date,
@@ -926,12 +1104,11 @@
     }
   };
 
-  // ----- RENDER HOME with new layout and Not Cheryl hiding -----
+  // ----- RENDER HOME with new Quick Workout button and Edit in history -----
   function renderHome() {
     const app = document.getElementById("app");
     applyTheme();
 
-    // Countdown (hidden in Not Cheryl via CSS)
     const now = new Date();
     let target = new Date(now.getFullYear(), 4, 1);
     if (now > target) target = new Date(now.getFullYear() + 1, 4, 1);
@@ -940,7 +1117,6 @@
     const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until May 1 ❤️`;
 
-    // Person stats for cards
     const persons = ['Dexter', 'Cheryl'];
     const personStats = persons.map(person => {
       const weights = data.bodyWeight.filter(w => w.person === person);
@@ -952,13 +1128,12 @@
     });
 
     app.innerHTML = `
-
       <div class="theme-picker">
         <button class="small-btn" onclick="setTheme('cute')">🌸 Cheryl mode 🌸</button>
         <button class="small-btn" onclick="setTheme('notcheryl')"> 🙅‍♂️No lovey dovey mode🙅‍♂️</button>
       </div>
 
-    <div class="countdown">${countdownText}</div>
+      <div class="countdown">${countdownText}</div>
 
       <!-- Weight Cards (top) - hidden in Not Cheryl -->
       <div class="weight-summary-cards">
@@ -985,6 +1160,7 @@
         <span class="version-badge">v${APP_VERSION}</span>
       </div>
       <button onclick="createTemplate()">➕ Create Workout</button>
+      <button onclick="startQuickWorkout()">⚡ Quick Workout</button>
       <button onclick="exportPrompt()" style="background:var(--surface-light);">🔗 Share / Import Workouts</button>
       <div id="templateList">
         ${data.templates.map((t,i)=>`
@@ -1001,8 +1177,6 @@
           </div>
         `).join("")}
       </div>
-
-
 
       <!-- Weight Logging Panel (hidden in Not Cheryl) -->
       <div class="weight-logging">
@@ -1057,6 +1231,7 @@
               `).join('')}
             </details>
             <div class="history-actions">
+              <button class="small-btn" onclick="editHistoryEntry(${realIndex})">✏️ Edit</button>
               <button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIndex})">Delete</button>
             </div>
           </div>
