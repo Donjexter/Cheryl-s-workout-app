@@ -545,9 +545,9 @@
   function renderHome() {
     const app = document.getElementById("app");
     applyTheme();
-    const now = new Date(), target = new Date(now.getFullYear(),4,1); if(now>target) target.setFullYear(target.getFullYear()+1);
+    const now = new Date(), target = new Date(now.getFullYear(),8,29); if(now>target) target.setFullYear(target.getFullYear()+1);
     const diffDays = Math.floor((target-now)/(1000*60*60*24)), diffHours = Math.floor(((target-now)%(1000*60*60*24))/(1000*60*60));
-    const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until May 1 ❤️`;
+    const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until 29th May ❤️`;
     const persons = ['Dexter','Cheryl'];
     const personStats = persons.map(p=>{ const w=data.bodyWeight.filter(w=>w.person===p); if(!w.length) return {person:p,first:null,last:null,delta:null}; const first=w[0],last=w[w.length-1]; const delta=(last.weight-first.weight).toFixed(1); return {person:p,first,last,delta}; });
     app.innerHTML = `
