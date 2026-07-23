@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v3.0 (Delete exercises anywhere + smart exercise search)</title>
+<title>Workout Tracker · v3.1 (Add exercises to any workout/saved log + delete exercises anywhere + smart exercise search)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) ----- */
   body.theme-cute, body.theme-notcheryl {
@@ -216,7 +216,14 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.0.0'; // Delete exercises anywhere + smart exercise search
+  const APP_VERSION = '3.1.0';
+  // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
+  //   "+ Add Exercise" is no longer hidden for template-based workouts or for
+  //   saved history entries opened for editing — you can now add a brand-new
+  //   exercise into ANY in-progress workout, not just Quick Workouts.
+  //   Search "FEATURE (added)" in this file to find the exact spot changed.
+  // Everything else (data shape, storage key "workoutApp", existing functions,
+  // themes, templates, history, body-weight tracking) is untouched.
 
   // ----- DEFAULT TEMPLATES (full list) -----
   const DEFAULT_TEMPLATES = [
@@ -377,7 +384,21 @@
           `;
         }).join('')}
       </div>
-      ${w.isQuickWorkout ? '<button onclick="showAddExercise()">+ Add Exercise</button>' : ''}
+      <!--
+        FEATURE (added): '+ Add Exercise' used to be restricted to w.isQuickWorkout,
+        which meant that once you started a workout from a template - or opened an
+        already-SAVED history entry via editHistoryEntry() (isHistoryEdit) - there was
+        no way to add a brand-new exercise that wasn't already in that log.
+        This button is now always shown so exercises can be added to:
+          1) Quick workouts (unchanged behavior)
+          2) Template-based workouts in progress
+          3) Saved history entries being edited (isHistoryEdit === true)
+        The underlying add flow (renderAddExercise / addExerciseToQuickWorkoutSmart)
+        already worked generically on data.activeWorkout.logs for any workout type -
+        it just wasn't reachable from the UI in these other two cases. No other logic
+        was touched; nothing here overwrites existing sets/logs/history.
+      -->
+      <button onclick="showAddExercise()">+ Add Exercise</button>
     `;
     resumeTimerIfNeeded();
   }
@@ -466,6 +487,12 @@
   window.showAddExercise = () => renderAddExercise();
 
   // ----- SMART EXERCISE ADD (less sensitive, no duplicates) -----
+  // NOTE: Despite the "QuickWorkout" naming kept below for backwards compatibility
+  // (so existing onclick="..." references and any external code/bookmarks keep working),
+  // this flow is generic: it reads/writes data.activeWorkout.logs directly and does not
+  // check w.isQuickWorkout anywhere. It is safe to call for a template-based workout in
+  // progress OR for a saved history entry opened via editHistoryEntry(). Function names
+  // were intentionally left unchanged to avoid breaking anything.
   function renderAddExercise() {
     const canonicalNames = getAllUniqueCanonicalExercises();
     const app = document.getElementById("app");
