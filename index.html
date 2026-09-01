@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v3.3 (Themes, editable timers, smoother mobile UI)</title>
+<title>Workout Tracker · v3.3.1 (Themes, tap-editable timers, smoother mobile UI)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) -----
      v3.3.0: themes are now purely cosmetic color palettes. The old
@@ -206,10 +206,8 @@
     font-weight: 700;
     flex: 1;
     max-width: 220px;
-    cursor: ns-resize;
     user-select: none;
     box-shadow: inset 0 0 0 2px var(--border);
-    touch-action: pan-x; /* leaves vertical wheel/scroll gesture free for us to intercept on desktop */
   }
   .timer-hint {
     text-align: center;
@@ -358,7 +356,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.3.0';
+  const APP_VERSION = '3.3.1';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -377,9 +375,8 @@
   //   1) "Create Workout" now opens straight into the new template's edit page
   //      instead of dropping back to the home list.
   //   2) The rest timer (dashboard AND exercise-detail screens) is now always
-  //      editable: scroll/trackpad on desktop, or tap the ± buttons, in 5s
-  //      steps (0-900s). Adjusts the live countdown if one is running,
-  //      otherwise the workout's default rest length.
+  //      editable via tap ± buttons, in 5s steps (0-900s). Adjusts the live
+  //      countdown if one is running, otherwise the workout's default rest length.
   //   3) Re-introduced multiple color themes (Cute/Dark/Ocean/Forest/Sunset/
   //      Mono) as simple swatch buttons. The old "notcheryl" theme, which used
   //      to ALSO hide the countdown/weight cards, is now the independent
@@ -389,6 +386,14 @@
   //      changes visually for them on first load.
   //   4) General visual/mobile pass: larger touch targets, iOS-safe 16px input
   //      font size (prevents auto-zoom), safe-area padding, softer shadows.
+  // v3.3.1 CHANGE (bugfix/polish, no data or storage changes):
+  //   1) Removed the mouse-wheel timer control - it never worked on touch
+  //      devices, which is most usage, so it was dead/confusing UI. Tap ± is
+  //      the only timer control now, on every screen the timer appears.
+  //   2) The exercise-list button on the workout dashboard now reads "✏️ Edit"
+  //      instead of "▶️ Do Exercise" once that exercise already has at least
+  //      one logged set, or whenever you're editing a saved history entry -
+  //      "Do Exercise" is reserved for exercises with nothing logged yet.
   // Everything else (data shape, storage key "workoutApp", existing functions,
   // history, body-weight tracking) is untouched. No cache/localStorage
   // clearing was added or changed anywhere in this update.
@@ -566,10 +571,10 @@
     return `
       <div class="timer-wrap">
         <button class="timer-step-btn" onclick="stepTimer(-5)">−</button>
-        <div class="timer" id="timer" onwheel="adjustTimerWheel(event)">${formatTime(seconds)}</div>
+        <div class="timer" id="timer">${formatTime(seconds)}</div>
         <button class="timer-step-btn" onclick="stepTimer(5)">+</button>
       </div>
-      <div class="timer-hint">⇕ scroll or tap ± to adjust</div>
+      <div class="timer-hint">Tap ± to adjust</div>
     `;
   }
   function resumeTimerIfNeeded() {
@@ -583,9 +588,9 @@
 
   // ----- EDITABLE TIMER (v3.3.0, additive) -----
   // Works on both the workout dashboard and the exercise-detail screen (both
-  // render a <div id="timer">). If a countdown is actively running, scrolling
-  // or tapping ± adjusts the time remaining; if not, it adjusts the workout's
-  // default rest duration (data.activeWorkout.rest), which is what the next
+  // render a <div id="timer">). Tapping ± adjusts the time remaining if a
+  // countdown is actively running, otherwise it adjusts the workout's default
+  // rest duration (data.activeWorkout.rest), which is what the next
   // "Log & Rest" will count down from. Nothing about startTimer/completeSet's
   // existing behavior changes.
   function refreshTimerLabel() {
@@ -607,7 +612,6 @@
     save();
     refreshTimerLabel();
   }
-  window.adjustTimerWheel = (evt) => { evt.preventDefault(); adjustTimerBy(evt.deltaY < 0 ? 5 : -5); };
   window.stepTimer = (delta) => adjustTimerBy(delta);
 
 
@@ -678,7 +682,7 @@
                 <span style="color:var(--accent);">${logged}/${total} sets</span>
               </div>
               <div class="exercise-actions">
-                <button class="small-btn" style="background:var(--accent);" onclick="doExercise(${idx})">▶️ Do Exercise</button>
+                <button class="small-btn" style="background:var(--accent);" onclick="doExercise(${idx})">${(logged > 0 || isHistoryEdit) ? '✏️ Edit' : '▶️ Do Exercise'}</button>
                 <button class="small-btn btn-danger" onclick="deleteExerciseFromActiveWorkout(${idx})">🗑️ Delete</button>
               </div>
             </div>
@@ -956,7 +960,7 @@
     app.innerHTML = `
       <div class="theme-picker">
         <div class="theme-swatches">${THEMES.map(t => `<button class="swatch-btn ${data.theme===t.id?'active':''}" style="--swatch:${t.swatch}" title="${t.label}" onclick="setTheme('${t.id}')"></button>`).join('')}</div>
-        <button class="small-btn lovey-toggle-btn" onclick="toggleLoveyMode()">${data.loveyMode ? '🙅 Hide the Love' : '🌸 Show the Love'}</button>
+        <button class="small-btn lovey-toggle-btn" onclick="toggleLoveyMode()">${data.loveyMode ? '🙅 Hide lovey extras' : '🌸 Show lovey extras'}</button>
       </div>
       <div class="countdown">${countdownText}</div>
       <div class="weight-summary-cards">${personStats.map(stat=>{ if(!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
