@@ -956,7 +956,7 @@
     app.innerHTML = `
       <div class="theme-picker">
         <div class="theme-swatches">${THEMES.map(t => `<button class="swatch-btn ${data.theme===t.id?'active':''}" style="--swatch:${t.swatch}" title="${t.label}" onclick="setTheme('${t.id}')"></button>`).join('')}</div>
-        <button class="small-btn lovey-toggle-btn" onclick="toggleLoveyMode()">${data.loveyMode ? '🙅 Hide lovey extras' : '🌸 Show lovey extras'}</button>
+        <button class="small-btn lovey-toggle-btn" onclick="toggleLoveyMode()">${data.loveyMode ? '🙅 Hide the Love' : '🌸 Show the Love'}</button>
       </div>
       <div class="countdown">${countdownText}</div>
       <div class="weight-summary-cards">${personStats.map(stat=>{ if(!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
