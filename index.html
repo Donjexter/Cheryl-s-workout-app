@@ -216,14 +216,24 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.1.0';
+  const APP_VERSION = '3.2.0';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
   //   exercise into ANY in-progress workout, not just Quick Workouts.
   //   Search "FEATURE (added)" in this file to find the exact spot changed.
+  // v3.2.0 CHANGE (additive only, nothing removed/rewritten from 3.1.0):
+  //   1) Progressive overload suggestion on the exercise detail screen, based on
+  //      the last logged set for that exercise (reads data.history only).
+  //   2) "📈 Progress" screen (new, reachable from Home) estimating 1-rep-max per
+  //      session via the Brzycki formula and plotting it as an inline SVG line
+  //      chart, per exercise. Pure read of data.history; writes nothing.
+  //   3) Autosave safeguard: weight/reps inputs now save on every keystroke
+  //      (not just on blur), plus a beforeunload warning while a workout is
+  //      active, so closing/reloading the tab can't silently lose in-progress data.
   // Everything else (data shape, storage key "workoutApp", existing functions,
-  // themes, templates, history, body-weight tracking) is untouched.
+  // themes, templates, history, body-weight tracking) is untouched. No cache/
+  // localStorage clearing was added or changed anywhere in this update.
 
   // ----- DEFAULT TEMPLATES (full list) -----
   const DEFAULT_TEMPLATES = [
@@ -258,6 +268,22 @@
   function save() { localStorage.setItem("workoutApp", JSON.stringify(data)); }
   function applyTheme() { document.body.className = `theme-${data.theme}`; }
 
+  // ----- AUTOSAVE SAFEGUARD (v3.2.0, additive) -----
+  // save() above is completely untouched - still just writes to the same
+  // "workoutApp" localStorage key it always did. This only adds a
+  // belt-and-suspenders browser warning so an accidental tab close/refresh
+  // while a workout is in progress can't catch anyone by surprise. Combined
+  // with weight/reps inputs now saving on every keystroke (see
+  // renderExerciseDetail below), by the time this dialog could show, the
+  // latest values are already in localStorage anyway - this is just an
+  // extra confirmation step.
+  window.addEventListener('beforeunload', (e) => {
+    if (data.activeWorkout) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   // ----- SMART EXERCISE NORMALIZATION & CANONICAL MAP (less sensitive search) -----
   function normalizeExerciseName(name) {
     return name.toLowerCase().replace(/[-\s]/g, '').replace(/[^a-z0-9]/g, '');
@@ -285,6 +311,55 @@
   function getAllUniqueCanonicalExercises() {
     const map = buildCanonicalExerciseMap();
     return Array.from(map.values()).sort((a,b) => a.localeCompare(b));
+  }
+
+  // ----- 1RM TRACKING VIA BRZYCKI FORMULA (v3.2.0, additive, read-only) -----
+  // 1RM = weight / (1.0278 - 0.0278 * reps). This approximation gets unreliable
+  // above ~10-12 reps, so sets with reps > 12 are skipped for this estimate
+  // (they're still shown fine everywhere else in the app - this only affects
+  // the Progress chart's calculation).
+  function brzyckiOneRM(weight, reps) {
+    if (!weight || !reps || reps < 1 || reps > 12) return null;
+    const denom = 1.0278 - 0.0278 * reps;
+    if (denom <= 0) return null;
+    return weight / denom;
+  }
+  // Returns [{date, oneRM}] sorted oldest->newest: the best (highest) estimated
+  // 1RM among that session's valid sets for the given exercise name.
+  function getOneRmHistory(exerciseName) {
+    const points = [];
+    data.history.forEach(entry => {
+      const exLog = entry.logs.find(l => l.name === exerciseName);
+      if (!exLog) return;
+      let best = null;
+      exLog.sets.forEach(s => {
+        const est = brzyckiOneRM(parseFloat(s.weight), parseInt(s.reps));
+        if (est !== null && (best === null || est > best)) best = est;
+      });
+      if (best !== null) points.push({ date: entry.date, oneRM: Math.round(best * 10) / 10 });
+    });
+    points.sort((a, b) => new Date(a.date) - new Date(b.date));
+    return points;
+  }
+  function buildOneRmChartSvg(points) {
+    const w = 560, h = 220, padL = 45, padR = 15, padT = 15, padB = 30;
+    const values = points.map(p => p.oneRM);
+    let min = Math.min(...values), max = Math.max(...values);
+    if (min === max) { min -= 1; max += 1; }
+    const range = max - min;
+    const x = i => padL + (points.length === 1 ? 0 : (i / (points.length - 1)) * (w - padL - padR));
+    const y = v => padT + (1 - (v - min) / range) * (h - padT - padB);
+    const linePoints = points.map((p, i) => `${x(i).toFixed(1)},${y(p.oneRM).toFixed(1)}`).join(' ');
+    const dots = points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.oneRM).toFixed(1)}" r="4" fill="var(--accent)"><title>${new Date(p.date).toLocaleDateString()}: ${p.oneRM}kg est. 1RM</title></circle>`).join('');
+    const labels = points.map((p, i) => (points.length <= 8 || i === 0 || i === points.length - 1 || i % Math.ceil(points.length / 6) === 0)
+      ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="9" text-anchor="middle" fill="var(--text-secondary)">${new Date(p.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</text>` : '').join('');
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto; background:var(--surface); border-radius:10px;">
+      <text x="${padL}" y="${padT}" font-size="10" fill="var(--text-secondary)">${max.toFixed(1)}kg</text>
+      <text x="${padL}" y="${h - padB}" font-size="10" fill="var(--text-secondary)">${min.toFixed(1)}kg</text>
+      <polyline points="${linePoints}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+      ${dots}
+      ${labels}
+    </svg>`;
   }
 
   // Timer (unchanged)
@@ -414,10 +489,37 @@
     return past.slice(0,6).join(', ');
   }
 
+  // ----- PROGRESSIVE OVERLOAD SUGGESTION (v3.2.0, additive, read-only) -----
+  // Reads data.history only - never writes anything. Looks at the most recent
+  // completed set (highest weight; ties broken by higher reps) logged for this
+  // exercise name and suggests either +5% weight at the same reps, or the same
+  // weight for one more rep, so the user can choose whichever fits their session.
+  function getOverloadSuggestion(exerciseName) {
+    for (let i = data.history.length - 1; i >= 0; i--) {
+      const exLog = data.history[i].logs.find(l => l.name === exerciseName);
+      if (!exLog) continue;
+      const validSets = exLog.sets.filter(s => parseFloat(s.weight) > 0 && parseInt(s.reps) > 0);
+      if (!validSets.length) continue;
+      const best = validSets.reduce((a, b) => {
+        const wa = parseFloat(a.weight), wb = parseFloat(b.weight);
+        if (wb > wa) return b;
+        if (wb === wa && parseInt(b.reps) > parseInt(a.reps)) return b;
+        return a;
+      });
+      const lastWeight = parseFloat(best.weight);
+      const lastReps = parseInt(best.reps);
+      let suggestedWeight = Math.round(lastWeight * 1.05 * 2) / 2; // +5%, rounded to nearest 0.5kg
+      if (suggestedWeight <= lastWeight) suggestedWeight = lastWeight + 0.5; // ensure it's always an increase
+      return `Last used weight was ${lastWeight}kg for ${lastReps} reps — now try ${suggestedWeight}kg, or ${lastWeight}kg for ${lastReps + 1} reps.`;
+    }
+    return null;
+  }
+
   function renderExerciseDetail(exIndex) {
     const w = data.activeWorkout;
     const exercise = w.logs[exIndex];
     const pastHint = getPastPerformance(exercise.name);
+    const overloadSuggestion = getOverloadSuggestion(exercise.name);
     const app = document.getElementById("app");
     app.innerHTML = `
       <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
@@ -427,11 +529,12 @@
       </div>
       <h2>${exercise.name} <button class="small-btn" onclick="renameExercise(${exIndex})">✏️ Rename</button></h2>
       ${pastHint ? `<div class="past-hint">📋 Past: ${pastHint}</div>` : ''}
+      ${overloadSuggestion ? `<div class="past-hint">📈 ${overloadSuggestion}</div>` : ''}
       ${exercise.sets.map((set, si) => `
         <div class="exercise-card">
           <b>Set ${si+1}</b><br>
-          <input placeholder="Weight (kg)" value="${set.weight || ''}" onchange="updateSet(${exIndex}, ${si}, 'weight', this.value)">
-          <input placeholder="Reps" value="${set.reps || ''}" onchange="updateSet(${exIndex}, ${si}, 'reps', this.value)">
+          <input placeholder="Weight (kg)" value="${set.weight || ''}" oninput="updateSet(${exIndex}, ${si}, 'weight', this.value)">
+          <input placeholder="Reps" value="${set.reps || ''}" oninput="updateSet(${exIndex}, ${si}, 'reps', this.value)">
           <button class="small-btn" style="background:var(--accent);" onclick="completeSet(${exIndex}, ${si})">✅ Log & Rest</button>
         </div>
       `).join("")}
@@ -569,6 +672,54 @@
   window.copyShareLink = () => { const selected = data.templates.filter(t=>selectedShareIds.includes(t.id)); if(!selected.length) return; const encoded = btoa(JSON.stringify(selected.map(({id,name,rest,repRange,exercises})=>({id,name,rest,repRange,exercises})))); const url = window.location.origin + window.location.pathname + '#' + encoded; navigator.clipboard.writeText(url).then(()=>{ alert('Link copied'); selectedShareIds=[]; renderHome(); }); };
   window.exportPrompt = () => { const code = prompt('Paste link or JSON:'); if(code) try{ let parsed; if(code.startsWith('http')) parsed=JSON.parse(atob(code.split('#')[1])); else parsed=JSON.parse(code); if(Array.isArray(parsed)){ parsed.forEach(t=>{ t.id='imported-'+Date.now()+'-'+Math.random().toString(36); data.templates.push(t); }); save(); renderHome(); alert('Imported'); } }catch(e){ alert('Invalid'); } };
   
+  // ----- PROGRESS SCREEN (v3.2.0, additive, read-only) -----
+  let progressExercise = null;
+  window.showProgress = () => {
+    if (!progressExercise) {
+      const names = getAllUniqueCanonicalExercises();
+      progressExercise = names[0] || null;
+    }
+    renderProgress();
+  };
+  window.selectProgressExercise = (name) => { progressExercise = name; renderProgress(); };
+  function renderProgress() {
+    const app = document.getElementById("app");
+    applyTheme();
+    const names = getAllUniqueCanonicalExercises();
+    let body;
+    if (!names.length) {
+      body = `<p>No exercises logged yet. Complete a workout first, then come back here to see your 1RM trend.</p>`;
+    } else {
+      if (!progressExercise || !names.includes(progressExercise)) progressExercise = names[0];
+      const points = getOneRmHistory(progressExercise);
+      if (points.length < 2) {
+        body = `<p>Not enough logged sessions for "${progressExercise}" yet (need at least 2 sessions with weight &amp; reps logged). Keep logging and check back!</p>`;
+      } else {
+        const first = points[0].oneRM, last = points[points.length - 1].oneRM;
+        const delta = Math.round((last - first) * 10) / 10;
+        const deltaClass = delta > 0 ? 'positive' : (delta < 0 ? 'negative' : '');
+        const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '●');
+        body = `
+          ${buildOneRmChartSvg(points)}
+          <div class="person-card" style="margin-top:10px;">
+            <b>Estimated 1RM (Brzycki)</b><br>
+            First logged: ${first}kg → Latest: ${last}kg
+            <br><span class="delta ${deltaClass}">${arrow} ${Math.abs(delta)}kg since first tracked session</span>
+          </div>
+        `;
+      }
+    }
+    app.innerHTML = `
+      <button onclick="renderHome()">← Back</button>
+      <h2>📈 Progress</h2>
+      ${names.length ? `<label>Exercise:</label>
+      <select onchange="selectProgressExercise(this.value)">
+        ${names.map(n => `<option value="${n.replace(/"/g,'&quot;')}" ${n===progressExercise?'selected':''}>${n}</option>`).join('')}
+      </select>` : ''}
+      ${body}
+    `;
+  }
+
   function renderHome() {
     const app = document.getElementById("app");
     applyTheme();
@@ -582,7 +733,7 @@
       <div class="countdown">${countdownText}</div>
       <div class="weight-summary-cards">${personStats.map(stat=>{ if(!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
       <div style="display:flex; justify-content:space-between;"><h2>🏋️ Workouts</h2><span class="version-badge">v${APP_VERSION}</span></div>
-      <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
+      <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="showProgress()">📈 Progress</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
       <div id="templateList">${data.templates.map(t=>`<div class="template-item"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="startWorkout('${t.id}')">▶️ Start</button><button class="small-btn" onclick="editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
       <div class="weight-logging"><h3>⚖️ Log Weight</h3><div class="flex-row"><input type="number" id="newWeight" placeholder="Weight (kg)" step="0.1"><select id="weightPerson"><option value="Dexter">Dexter</option><option value="Cheryl">Cheryl</option></select><input type="date" id="weightDate"><button class="small-btn btn-primary" onclick="addWeight()">➕ Log</button><button class="small-btn" onclick="copyProgressSummary()">📤 Copy Summary</button></div><div>${data.bodyWeight.map((w,idx)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${idx})">🗑️</button></div>`).join('')}</div></div>
       <h3>📜 History (${data.history.length})</h3><div class="import-export-bar"><button onclick="exportHistory()">📤 Export</button><button onclick="importHistoryPrompt()">📥 Import</button><button class="btn-danger" onclick="clearAllHistory()">🗑️ Clear All</button></div>
