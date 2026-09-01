@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v3.3.1 (Themes, tap-editable timers, smoother mobile UI)</title>
+<title>Workout Tracker · v3.3.2 (Themes, tap-editable timers, smart weight parsing)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) -----
      v3.3.0: themes are now purely cosmetic color palettes. The old
@@ -356,7 +356,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.3.1';
+  const APP_VERSION = '3.3.2';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -776,7 +776,31 @@
   // Override doExercise, goToDashboard, etc to use updated render functions
   window.doExercise = (exIndex) => { data.activeWorkout.currentView = exIndex; save(); renderExerciseDetail(exIndex); };
   window.goToDashboard = () => { data.activeWorkout.currentView = 'dashboard'; save(); renderWorkoutDashboard(); };
-  window.updateSet = (exIndex, setIndex, field, value) => { if (data.activeWorkout) { data.activeWorkout.logs[exIndex].sets[setIndex][field] = value; save(); } };
+  // ----- WEIGHT INPUT ROBUSTNESS (v3.3.2, additive) -----
+  // People often type dumbbell shorthand like "7x2" (meaning 7kg, done on
+  // each of 2 sides/hands) into the weight field. We only ever want the
+  // actual weight number out of that, so we take the leading run of digits
+  // (with an optional decimal point) and drop everything from the first
+  // non-numeric character onward. A value that's already just a plain
+  // number (e.g. "42" or "7.5") passes through completely unchanged. If
+  // there's no leading number at all (e.g. still empty, or something like
+  // "bw" for bodyweight), the original text is kept as typed rather than
+  // silently cleared, so someone deliberately typing non-numeric notes into
+  // the field doesn't get their input wiped out.
+  function parseWeightValue(raw) {
+    if (raw === null || raw === undefined) return raw;
+    const str = String(raw).trim();
+    if (str === '') return str;
+    const match = str.match(/^(\d+(?:\.\d+)?)/);
+    return match ? String(Number(match[1])) : str;
+  }
+  window.updateSet = (exIndex, setIndex, field, value) => {
+    if (data.activeWorkout) {
+      if (field === 'weight') value = parseWeightValue(value);
+      data.activeWorkout.logs[exIndex].sets[setIndex][field] = value;
+      save();
+    }
+  };
   window.completeSet = (exIndex, setIndex) => { const w = data.activeWorkout; const set = w.logs[exIndex].sets[setIndex]; if (parseInt(set.reps) > 15) alert("High reps!"); startTimer(w.rest); };
   window.addSet = (exIndex) => { data.activeWorkout.logs[exIndex].sets.push({ weight: "", reps: "" }); save(); renderExerciseDetail(exIndex); };
   window.removeSet = (exIndex) => { const sets = data.activeWorkout.logs[exIndex].sets; if (sets.length > 1) { sets.pop(); save(); renderExerciseDetail(exIndex); } else alert("Cannot remove only set"); };
