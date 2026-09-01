@@ -2,9 +2,16 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v3.1 (Add exercises to any workout/saved log + delete exercises anywhere + smart exercise search)</title>
+<title>Workout Tracker · v3.3 (Themes, editable timers, smoother mobile UI)</title>
 <style>
-  /* ----- THEME VARIABLES (applied to body) ----- */
+  /* ----- THEME VARIABLES (applied to body) -----
+     v3.3.0: themes are now purely cosmetic color palettes. The old
+     "notcheryl" theme used to ALSO hide the countdown/weight cards - that
+     behavior is now the independent .no-lovey class (see loveyMode below),
+     so any color theme can be combined with lovey-extras on or off.
+     "theme-notcheryl" is kept mapped to the same palette as "theme-cute" as
+     a defensive fallback only; on load, any stored theme:'notcheryl' is
+     migrated to theme:'cute' + loveyMode:false (see data migration below). */
   body.theme-cute, body.theme-notcheryl {
     --bg: #fff5f7;
     --surface: #ffe9ec;
@@ -17,70 +24,151 @@
     --warning: #ffb347;
     --border: #fcc;
   }
-  body.theme-notcheryl .countdown,
-  body.theme-notcheryl .weight-summary-cards,
-  body.theme-notcheryl .weight-logging {
+  body.theme-dark {
+    --bg: #14151a;
+    --surface: #1e2028;
+    --surface-light: #282b38;
+    --text: #eef0f5;
+    --text-secondary: #9aa0ad;
+    --accent: #7c9eff;
+    --accent-light: #a9c1ff;
+    --danger: #ff6b6b;
+    --warning: #ffb347;
+    --border: #33384a;
+  }
+  body.theme-ocean {
+    --bg: #f0f9fb;
+    --surface: #e0f2f6;
+    --surface-light: #cdebf1;
+    --text: #123b46;
+    --text-secondary: #4d7a86;
+    --accent: #1fa2b8;
+    --accent-light: #5cc7da;
+    --danger: #e4574c;
+    --warning: #f5a742;
+    --border: #b7dee6;
+  }
+  body.theme-forest {
+    --bg: #f3f8f1;
+    --surface: #e4efe0;
+    --surface-light: #d3e6cc;
+    --text: #25381f;
+    --text-secondary: #5c7355;
+    --accent: #4c8c4a;
+    --accent-light: #7ab377;
+    --danger: #d2574a;
+    --warning: #e0a63e;
+    --border: #c1d9b8;
+  }
+  body.theme-sunset {
+    --bg: #fff7f0;
+    --surface: #ffe9d6;
+    --surface-light: #ffd9b8;
+    --text: #4a2e1e;
+    --text-secondary: #8a6650;
+    --accent: #ff7a45;
+    --accent-light: #ffab7a;
+    --danger: #e0453f;
+    --warning: #ffb347;
+    --border: #f2c6a0;
+  }
+  body.theme-mono {
+    --bg: #f5f5f6;
+    --surface: #e9e9ec;
+    --surface-light: #dcdce1;
+    --text: #2b2b2f;
+    --text-secondary: #6c6c74;
+    --accent: #5b5b66;
+    --accent-light: #84848d;
+    --danger: #d1453a;
+    --warning: #c98a2c;
+    --border: #cfcfd6;
+  }
+  body.no-lovey .countdown,
+  body.no-lovey .weight-summary-cards,
+  body.no-lovey .weight-logging {
     display: none !important;
   }
 
+  * { -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     margin: 0;
     background: var(--bg);
     color: var(--text);
     transition: background 0.2s, color 0.2s;
+    -webkit-font-smoothing: antialiased;
   }
   .container {
-    padding: 20px;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom, 0px));
     max-width: 600px;
     margin: 0 auto;
     box-sizing: border-box;
     width: 100%;
   }
+  h2 {
+    font-size: 1.3rem;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 1.05rem;
+    color: var(--text);
+    margin: 18px 0 8px;
+  }
   button {
-    padding: 10px;
+    padding: 12px;
     margin: 5px 0;
     background: var(--surface-light);
     color: var(--text);
     border: none;
-    border-radius: 8px;
+    border-radius: 12px;
     width: 100%;
+    font-size: 15px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s, transform 0.1s;
     box-sizing: border-box;
+    min-height: 44px;
+    -webkit-appearance: none;
+    appearance: none;
   }
   button:hover { background: var(--border); }
+  button:active { transform: scale(0.98); }
   button.small-btn {
     width: auto;
-    padding: 5px 10px;
-    font-size: 12px;
+    padding: 8px 12px;
+    font-size: 13px;
     margin: 2px;
+    min-height: 36px;
   }
-  .btn-primary { background: var(--accent); color: var(--text); }
+  .btn-primary { background: var(--accent); color: white; font-weight: 600; }
   .btn-primary:hover { background: var(--accent-light); }
-  .btn-danger { background: var(--danger); color: var(--text); }
+  .btn-danger { background: var(--danger); color: white; }
   .btn-warning { background: var(--warning); color: var(--text); }
 
   input, select, textarea {
-    padding: 8px;
+    padding: 10px;
     margin: 4px 0;
-    border-radius: 6px;
+    border-radius: 10px;
     border: 1px solid var(--border);
     width: 100%;
     background: var(--surface);
     color: var(--text);
     box-sizing: border-box;
     max-width: 100%;
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
   }
+  select { -webkit-appearance: none; appearance: none; }
   .exercise-card {
     background: var(--surface);
-    padding: 12px;
-    margin: 8px 0;
-    border-radius: 10px;
+    padding: 14px;
+    margin: 10px 0;
+    border-radius: 14px;
     border-left: 3px solid var(--accent);
     cursor: grab;
-    transition: background 0.2s;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
   }
   .exercise-card.dragging {
     opacity: 0.5;
@@ -93,14 +181,41 @@
     color: var(--text-secondary);
     user-select: none;
   }
+  .timer-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin: 15px 0 4px;
+  }
+  .timer-step-btn {
+    width: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
+    font-size: 20px;
+    border-radius: 50%;
+    background: var(--surface-light);
+    margin: 0;
+  }
   .timer {
-    font-size: 32px;
+    font-size: 34px;
     text-align: center;
-    margin: 15px 0;
     background: var(--surface);
-    padding: 10px;
+    padding: 10px 0;
     border-radius: 20px;
-    font-weight: 600;
+    font-weight: 700;
+    flex: 1;
+    max-width: 220px;
+    cursor: ns-resize;
+    user-select: none;
+    box-shadow: inset 0 0 0 2px var(--border);
+    touch-action: pan-x; /* leaves vertical wheel/scroll gesture free for us to intercept on desktop */
+  }
+  .timer-hint {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
   }
   .flex-row {
     display: flex;
@@ -110,10 +225,11 @@
   }
   .history-item, .template-item, .weight-item {
     background: var(--surface);
-    padding: 12px;
+    padding: 14px;
     margin: 10px 0;
-    border-radius: 10px;
+    border-radius: 14px;
     word-wrap: break-word;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
   }
   .history-actions {
     display: flex;
@@ -128,6 +244,7 @@
     font-size: 12px;
     color: var(--text-secondary);
     text-align: center;
+    align-self: center;
   }
   .import-export-bar {
     display: flex;
@@ -136,29 +253,49 @@
     flex-wrap: wrap;
   }
   .countdown {
-    background: #9c27b0;
+    background: linear-gradient(135deg, var(--accent), var(--accent-light));
     color: white;
-    padding: 12px;
+    padding: 14px;
     border-radius: 40px;
     text-align: center;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     font-weight: 600;
     margin-bottom: 20px;
-    box-shadow: 0 4px 10px rgba(156,39,176,0.3);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
   }
   .theme-picker {
     display: flex;
-    gap: 8px;
-    margin: 20px 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: 16px 0 22px;
+  }
+  .theme-swatches {
+    display: flex;
+    gap: 10px;
     justify-content: center;
     flex-wrap: wrap;
   }
-  .theme-picker button {
-    width: auto;
-    padding: 8px 16px;
-    background: var(--surface-light);
-    border: 1px solid var(--border);
+  .swatch-btn {
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
+    padding: 0;
+    margin: 0;
+    border-radius: 50%;
+    background: var(--swatch);
+    border: 3px solid transparent;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
   }
+  .swatch-btn.active {
+    border-color: var(--text);
+    transform: scale(1.1);
+  }
+  .lovey-toggle-btn { width: auto; padding: 8px 16px; }
   .person-card {
     background: var(--surface-light);
     padding: 12px;
@@ -174,7 +311,7 @@
   .weight-summary-cards {
     background: var(--surface);
     padding: 16px;
-    border-radius: 12px;
+    border-radius: 14px;
     margin: 16px 0;
     display: flex;
     gap: 12px;
@@ -183,12 +320,12 @@
   .weight-logging {
     background: var(--surface);
     padding: 16px;
-    border-radius: 12px;
+    border-radius: 14px;
     margin: 16px 0;
   }
   .sticky-share-bar {
     position: sticky;
-    bottom: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     background: var(--surface-light);
     padding: 10px;
     border-radius: 30px;
@@ -197,6 +334,7 @@
     gap: 8px;
     border: 1px solid var(--border);
     flex-wrap: wrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
   }
   .past-hint {
     font-size: 0.8rem;
@@ -209,6 +347,10 @@
     margin-top: 8px;
     justify-content: flex-end;
   }
+  @media (max-width: 380px) {
+    .container { padding: 12px 12px calc(20px + env(safe-area-inset-bottom, 0px)); }
+    .timer { font-size: 28px; }
+  }
 </style>
 </head>
 <body>
@@ -216,7 +358,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.2.0';
+  const APP_VERSION = '3.3.0';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -231,9 +373,25 @@
   //   3) Autosave safeguard: weight/reps inputs now save on every keystroke
   //      (not just on blur), plus a beforeunload warning while a workout is
   //      active, so closing/reloading the tab can't silently lose in-progress data.
+  // v3.3.0 CHANGE:
+  //   1) "Create Workout" now opens straight into the new template's edit page
+  //      instead of dropping back to the home list.
+  //   2) The rest timer (dashboard AND exercise-detail screens) is now always
+  //      editable: scroll/trackpad on desktop, or tap the ± buttons, in 5s
+  //      steps (0-900s). Adjusts the live countdown if one is running,
+  //      otherwise the workout's default rest length.
+  //   3) Re-introduced multiple color themes (Cute/Dark/Ocean/Forest/Sunset/
+  //      Mono) as simple swatch buttons. The old "notcheryl" theme, which used
+  //      to ALSO hide the countdown/weight cards, is now the independent
+  //      "Hide lovey extras" toggle (data.loveyMode) so it can be combined
+  //      with any color theme. Existing users with theme:'notcheryl' saved are
+  //      migrated automatically to theme:'cute' + loveyMode:false, so nothing
+  //      changes visually for them on first load.
+  //   4) General visual/mobile pass: larger touch targets, iOS-safe 16px input
+  //      font size (prevents auto-zoom), safe-area padding, softer shadows.
   // Everything else (data shape, storage key "workoutApp", existing functions,
-  // themes, templates, history, body-weight tracking) is untouched. No cache/
-  // localStorage clearing was added or changed anywhere in this update.
+  // history, body-weight tracking) is untouched. No cache/localStorage
+  // clearing was added or changed anywhere in this update.
 
   // ----- DEFAULT TEMPLATES (full list) -----
   const DEFAULT_TEMPLATES = [
@@ -251,11 +409,21 @@
   let data;
 
   if (!stored) {
-    data = { templates: [...DEFAULT_TEMPLATES], activeWorkout: null, history: [], bodyWeight: [], theme: 'cute', version: APP_VERSION };
+    data = { templates: [...DEFAULT_TEMPLATES], activeWorkout: null, history: [], bodyWeight: [], theme: 'cute', loveyMode: true, version: APP_VERSION };
   } else {
     let mergedTemplates = stored.templates || [];
     DEFAULT_TEMPLATES.forEach(def => { if (!mergedTemplates.some(t => t.id === def.id)) mergedTemplates.push(def); });
-    data = { templates: mergedTemplates, activeWorkout: stored.activeWorkout || null, history: stored.history || [], bodyWeight: stored.bodyWeight || [], theme: stored.theme || 'cute', version: APP_VERSION };
+    // v3.3.0 migration: "notcheryl" used to be a color theme that ALSO hid the
+    // countdown/weight cards. Themes are now purely cosmetic; a stored theme
+    // of 'notcheryl' becomes the new independent loveyMode flag (OFF) with a
+    // normal color theme underneath, so it looks exactly like before.
+    let migratedTheme = stored.theme;
+    let migratedLovey = stored.loveyMode;
+    if (migratedTheme === 'notcheryl') {
+      migratedTheme = 'cute';
+      if (migratedLovey === undefined) migratedLovey = false;
+    }
+    data = { templates: mergedTemplates, activeWorkout: stored.activeWorkout || null, history: stored.history || [], bodyWeight: stored.bodyWeight || [], theme: migratedTheme || 'cute', loveyMode: migratedLovey === undefined ? true : migratedLovey, version: APP_VERSION };
   }
   data.templates = data.templates.map(t => ({ id: t.id || 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2,8), ...t }));
   data.bodyWeight = data.bodyWeight.map(w => ({ ...w, person: w.person || 'Dexter' }));
@@ -265,8 +433,20 @@
     if (!data.activeWorkout.logs) data.activeWorkout.logs = data.activeWorkout.exercises.map(e => ({ name: e.name, sets: Array.from({ length: e.sets }, () => ({ weight: "", reps: "" })) }));
   }
 
+  const THEMES = [
+    { id: 'cute', label: 'Cute', swatch: '#ff8a9f' },
+    { id: 'dark', label: 'Dark', swatch: '#7c9eff' },
+    { id: 'ocean', label: 'Ocean', swatch: '#1fa2b8' },
+    { id: 'forest', label: 'Forest', swatch: '#4c8c4a' },
+    { id: 'sunset', label: 'Sunset', swatch: '#ff7a45' },
+    { id: 'mono', label: 'Mono', swatch: '#5b5b66' }
+  ];
+
   function save() { localStorage.setItem("workoutApp", JSON.stringify(data)); }
-  function applyTheme() { document.body.className = `theme-${data.theme}`; }
+  function applyTheme() { document.body.className = `theme-${data.theme}` + (data.loveyMode ? '' : ' no-lovey'); }
+  window.setTheme = (theme) => { data.theme = theme; save(); applyTheme(); if (data.activeWorkout) renderWorkout(); else renderHome(); };
+  window.toggleLoveyMode = () => { data.loveyMode = !data.loveyMode; save(); applyTheme(); if (data.activeWorkout) renderWorkout(); else renderHome(); };
+
 
   // ----- AUTOSAVE SAFEGUARD (v3.2.0, additive) -----
   // save() above is completely untouched - still just writes to the same
@@ -382,6 +562,16 @@
     if (remaining <= 0) { clearTimer(); if (data.activeWorkout) delete data.activeWorkout.timerEnd; save(); timerDiv.innerText = '0:00'; alert('Rest over!'); }
   }
   function formatTime(s) { const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${sec < 10 ? '0' : ''}${sec}`; }
+  function renderTimerBlock(seconds) {
+    return `
+      <div class="timer-wrap">
+        <button class="timer-step-btn" onclick="stepTimer(-5)">−</button>
+        <div class="timer" id="timer" onwheel="adjustTimerWheel(event)">${formatTime(seconds)}</div>
+        <button class="timer-step-btn" onclick="stepTimer(5)">+</button>
+      </div>
+      <div class="timer-hint">⇕ scroll or tap ± to adjust</div>
+    `;
+  }
   function resumeTimerIfNeeded() {
     if (data.activeWorkout && data.activeWorkout.timerEnd) {
       const remaining = Math.floor((data.activeWorkout.timerEnd - Date.now()) / 1000);
@@ -390,6 +580,36 @@
     }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { resumeTimerIfNeeded(); if (data.activeWorkout) renderWorkout(); } });
+
+  // ----- EDITABLE TIMER (v3.3.0, additive) -----
+  // Works on both the workout dashboard and the exercise-detail screen (both
+  // render a <div id="timer">). If a countdown is actively running, scrolling
+  // or tapping ± adjusts the time remaining; if not, it adjusts the workout's
+  // default rest duration (data.activeWorkout.rest), which is what the next
+  // "Log & Rest" will count down from. Nothing about startTimer/completeSet's
+  // existing behavior changes.
+  function refreshTimerLabel() {
+    const timerDiv = document.getElementById('timer');
+    if (!timerDiv || !data.activeWorkout) return;
+    if (data.activeWorkout.timerEnd) updateTimerDisplay();
+    else timerDiv.innerText = formatTime(data.activeWorkout.rest || 0);
+  }
+  function adjustTimerBy(deltaSeconds) {
+    const w = data.activeWorkout;
+    if (!w) return;
+    if (w.timerEnd) {
+      const remaining = Math.max(0, Math.floor((w.timerEnd - Date.now()) / 1000));
+      const next = Math.max(0, Math.min(900, remaining + deltaSeconds));
+      w.timerEnd = Date.now() + next * 1000;
+    } else {
+      w.rest = Math.max(0, Math.min(900, (w.rest || 0) + deltaSeconds));
+    }
+    save();
+    refreshTimerLabel();
+  }
+  window.adjustTimerWheel = (evt) => { evt.preventDefault(); adjustTimerBy(evt.deltaY < 0 ? 5 : -5); };
+  window.stepTimer = (delta) => adjustTimerBy(delta);
+
 
   // Weight & history helpers (unchanged)
   window.addWeight = () => {
@@ -404,8 +624,14 @@
   };
   window.deleteWeight = (idx) => { if (confirm('Delete entry?')) { data.bodyWeight.splice(idx,1); save(); renderHome(); } };
   window.copyProgressSummary = () => { /* same as before, kept for brevity, not modified */ alert("Summary copied (legacy)"); };
-  window.setTheme = (theme) => { data.theme = theme; save(); applyTheme(); if (data.activeWorkout) renderWorkout(); else renderHome(); };
-  window.createTemplate = () => { const name = prompt("Template Name:"); if(name) { data.templates.push({ id: 'manual-'+Date.now()+'-'+Math.random().toString(36), name, rest: 120, repRange: "8-15", exercises: [] }); save(); renderHome(); } };
+  window.createTemplate = () => {
+    const name = prompt("Template Name:");
+    if (!name || !name.trim()) return;
+    const id = 'manual-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+    data.templates.push({ id, name: name.trim(), rest: 120, repRange: "8-15", exercises: [] });
+    save();
+    editTemplate(id); // v3.3.0: jump straight into editing the new workout instead of back to the list
+  };
   window.deleteTemplate = (id) => { if(confirm("Delete template?")){ data.templates = data.templates.filter(t => t.id !== id); save(); renderHome(); } };
   function findTemplateIndex(id) { return data.templates.findIndex(t => t.id === id); }
   window.renameTemplate = (id) => { const i = findTemplateIndex(id); if(i===-1) return; const newName = prompt("New name:", data.templates[i].name); if(newName?.trim()) { data.templates[i].name = newName.trim(); save(); editTemplate(id); } };
@@ -440,7 +666,7 @@
         ${isHistoryEdit ? `<button onclick="finishWorkout(true)">💾 Save Changes</button><button onclick="cancelEdit()">✖ Cancel</button>` : `<button onclick="endWorkout()">🏁 End Workout</button>`}
       </div>
       <h2>${w.name || 'Workout'} <button class="small-btn" onclick="renameWorkout()">✏️ Rename</button></h2>
-      <div class="timer" id="timer">${formatTime(w.rest)}</div>
+      ${renderTimerBlock(w.rest)}
       <div style="margin-top:20px;">
         ${w.logs.map((log, idx) => {
           const logged = log.sets.filter(set => set.reps && set.reps.toString().trim() !== '').length;
@@ -510,7 +736,7 @@
       const lastReps = parseInt(best.reps);
       let suggestedWeight = Math.round(lastWeight * 1.05 * 2) / 2; // +5%, rounded to nearest 0.5kg
       if (suggestedWeight <= lastWeight) suggestedWeight = lastWeight + 0.5; // ensure it's always an increase
-      return `Last used weight was ${lastWeight}kg for ${lastReps} reps — now try ${suggestedWeight}kg, or ${lastWeight}kg for ${lastReps + 1} reps.`;
+      return `Now try ${suggestedWeight}kg, or ${lastWeight}kg for ${lastReps + 1} reps.`;
     }
     return null;
   }
@@ -528,8 +754,7 @@
         <button class="small-btn btn-danger" onclick="endWorkout()">🏁 End</button>
       </div>
       <h2>${exercise.name} <button class="small-btn" onclick="renameExercise(${exIndex})">✏️ Rename</button></h2>
-      ${pastHint ? `<div class="past-hint">📋 Past: ${pastHint}</div>` : ''}
-      ${overloadSuggestion ? `<div class="past-hint">📈 ${overloadSuggestion}</div>` : ''}
+      ${(pastHint || overloadSuggestion) ? `<div class="past-hint">${pastHint ? `📋 Past: ${pastHint}` : ''}${pastHint && overloadSuggestion ? '<br>' : ''}${overloadSuggestion ? `📈 ${overloadSuggestion}` : ''}</div>` : ''}
       ${exercise.sets.map((set, si) => `
         <div class="exercise-card">
           <b>Set ${si+1}</b><br>
@@ -539,7 +764,7 @@
         </div>
       `).join("")}
       <div class="flex-row"><button class="small-btn" onclick="addSet(${exIndex})">➕ Add Set</button><button class="small-btn" onclick="removeSet(${exIndex})">➖ Remove Set</button></div>
-      <div class="timer" id="timer">${formatTime(w.rest)}</div>
+      ${renderTimerBlock(w.rest)}
     `;
     resumeTimerIfNeeded();
   }
@@ -729,7 +954,10 @@
     const persons = ['Dexter','Cheryl'];
     const personStats = persons.map(p=>{ const w=data.bodyWeight.filter(w=>w.person===p); if(!w.length) return {person:p,first:null,last:null,delta:null}; const first=w[0],last=w[w.length-1]; const delta=(last.weight-first.weight).toFixed(1); return {person:p,first,last,delta}; });
     app.innerHTML = `
-      <div class="theme-picker"><button onclick="setTheme('cute')">🌸 Cheryl mode 🌸</button><button onclick="setTheme('notcheryl')"> 🙅‍♂️No lovey dovey mode🙅‍♂️</button></div>
+      <div class="theme-picker">
+        <div class="theme-swatches">${THEMES.map(t => `<button class="swatch-btn ${data.theme===t.id?'active':''}" style="--swatch:${t.swatch}" title="${t.label}" onclick="setTheme('${t.id}')"></button>`).join('')}</div>
+        <button class="small-btn lovey-toggle-btn" onclick="toggleLoveyMode()">${data.loveyMode ? '🙅 Hide lovey extras' : '🌸 Show lovey extras'}</button>
+      </div>
       <div class="countdown">${countdownText}</div>
       <div class="weight-summary-cards">${personStats.map(stat=>{ if(!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
       <div style="display:flex; justify-content:space-between;"><h2>🏋️ Workouts</h2><span class="version-badge">v${APP_VERSION}</span></div>
