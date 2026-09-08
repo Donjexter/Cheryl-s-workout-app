@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workout Tracker · v3.3.2 (Themes, tap-editable timers, smart weight parsing)</title>
+<title>Workout Tracker · v3.3.3 (Themes, tap-editable timers, smart weight parsing)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) -----
      v3.3.0: themes are now purely cosmetic color palettes. The old
@@ -356,7 +356,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.3.2';
+  const APP_VERSION = '3.3.3';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -787,10 +787,25 @@
   // "bw" for bodyweight), the original text is kept as typed rather than
   // silently cleared, so someone deliberately typing non-numeric notes into
   // the field doesn't get their input wiped out.
+  // ----- WEIGHT INPUT ROBUSTNESS (v3.3.3, revised) -----
+  // "7x2" (or "7 x 2", "7X2", "7*2", "7×2") means 7kg two times - i.e. it's a
+  // multiplication shorthand, not "7kg, ignore the rest" - so we compute the
+  // product (7 * 2 = 14) and store that as the weight. Handles decimals on
+  // either side ("7.5x2" -> 15) and stray trailing text after the numbers
+  // ("10x2 reps" -> 20). If the text isn't a two-number multiplication
+  // expression, we fall back to just taking the leading number (e.g. "7kg"
+  // -> "7"), and if there's no leading number at all (e.g. "bw" for
+  // bodyweight, or still empty), the original text is kept as typed so
+  // deliberate non-numeric notes aren't silently wiped out.
   function parseWeightValue(raw) {
     if (raw === null || raw === undefined) return raw;
     const str = String(raw).trim();
     if (str === '') return str;
+    const multMatch = str.match(/^(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)/);
+    if (multMatch) {
+      const product = parseFloat(multMatch[1]) * parseFloat(multMatch[2]);
+      return String(Math.round(product * 100) / 100);
+    }
     const match = str.match(/^(\d+(?:\.\d+)?)/);
     return match ? String(Number(match[1])) : str;
   }
