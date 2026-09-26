@@ -170,6 +170,12 @@
     transition: background 0.2s, box-shadow 0.2s;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
   }
+  .exercise-card-tappable {
+    cursor: pointer;
+  }
+  .exercise-card-tappable:active {
+    background: var(--surface-light);
+  }
   .exercise-card.dragging {
     opacity: 0.5;
     background: var(--surface-light);
@@ -228,6 +234,12 @@
     border-radius: 14px;
     word-wrap: break-word;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .template-item-tappable {
+    cursor: pointer;
+  }
+  .template-item-tappable:active {
+    background: var(--surface-light);
   }
   .history-actions {
     display: flex;
@@ -676,14 +688,13 @@
           const logged = log.sets.filter(set => set.reps && set.reps.toString().trim() !== '').length;
           const total = log.sets.length;
           return `
-            <div class="exercise-card">
+            <div class="exercise-card exercise-card-tappable" onclick="doExercise(${idx})">
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <b>${log.name}</b>
                 <span style="color:var(--accent);">${logged}/${total} sets</span>
               </div>
               <div class="exercise-actions">
-                <button class="small-btn" style="background:var(--accent);" onclick="doExercise(${idx})">${(logged > 0 || isHistoryEdit) ? '✏️ Edit' : '▶️ Do Exercise'}</button>
-                <button class="small-btn btn-danger" onclick="deleteExerciseFromActiveWorkout(${idx})">🗑️ Delete</button>
+                <button class="small-btn btn-danger" onclick="event.stopPropagation(); deleteExerciseFromActiveWorkout(${idx})">🗑️ Delete</button>
               </div>
             </div>
           `;
@@ -717,6 +728,30 @@
       if (past.length >= 6) break;
     }
     return past.slice(0,6).join(', ');
+  }
+
+  // ----- AUTO-FILL LAST USED SETS (additive, read-only source) -----
+  // Looks at the most recent history entry that logged this exact exercise
+  // name and returns its sets array (weight/reps per set) so a freshly
+  // started exercise can start pre-filled with what was actually done last
+  // time, instead of blank fields. Never writes to history - only read.
+  function getLastUsedSets(exerciseName) {
+    for (let i = data.history.length - 1; i >= 0; i--) {
+      const exLog = data.history[i].logs.find(l => l.name === exerciseName);
+      if (exLog && exLog.sets && exLog.sets.length) return exLog.sets;
+    }
+    return null;
+  }
+  // Builds a sets array of the requested length, filling each slot from the
+  // last-used sets at the same index; if there are more requested sets than
+  // were logged last time, the extra ones repeat the last logged set's
+  // values (falls back to blank if nothing was ever logged for this name).
+  function buildAutofilledSets(exerciseName, count) {
+    const lastSets = getLastUsedSets(exerciseName);
+    return Array.from({ length: count }, (_, si) => {
+      const source = lastSets ? (lastSets[si] || lastSets[lastSets.length - 1]) : null;
+      return { weight: source?.weight || "", reps: source?.reps || "" };
+    });
   }
 
   // ----- PROGRESSIVE OVERLOAD SUGGESTION (v3.2.0, additive, read-only) -----
@@ -847,7 +882,7 @@
   window.startWorkout = (id) => {
     const i = findTemplateIndex(id); if(i===-1) return;
     const template = JSON.parse(JSON.stringify(data.templates[i]));
-    template.logs = template.exercises.map(e => ({ name: e.name, sets: Array.from({ length: e.sets }, () => ({ weight: "", reps: "" })) }));
+    template.logs = template.exercises.map(e => ({ name: e.name, sets: buildAutofilledSets(e.name, e.sets) }));
     template.startedAt = new Date().toISOString(); template.templateId = id; delete template.timerEnd; template.currentView = 'dashboard';
     data.activeWorkout = template; save(); renderWorkout();
   };
@@ -903,7 +938,7 @@
     const sets = parseInt(setsInput?.value) || 1;
     const w = data.activeWorkout;
     if (!w) return;
-    w.logs.push({ name: finalName, sets: Array.from({ length: sets }, () => ({ weight: "", reps: "" })) });
+    w.logs.push({ name: finalName, sets: buildAutofilledSets(finalName, sets) });
     save();
     goToDashboard();
   };
@@ -1005,7 +1040,7 @@
       <div class="weight-summary-cards">${personStats.map(stat=>{ if(!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
       <div style="display:flex; justify-content:space-between;"><h2>🏋️ Workouts</h2><span class="version-badge">v${APP_VERSION}</span></div>
       <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="showProgress()">📈 Progress</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
-      <div id="templateList">${data.templates.map(t=>`<div class="template-item"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="startWorkout('${t.id}')">▶️ Start</button><button class="small-btn" onclick="editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
+      <div id="templateList">${data.templates.map(t=>`<div class="template-item template-item-tappable" onclick="startWorkout('${t.id}')"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="event.stopPropagation(); deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="event.stopPropagation(); selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
       <div class="weight-logging"><h3>⚖️ Log Weight</h3><div class="flex-row"><input type="number" id="newWeight" placeholder="Weight (kg)" step="0.1"><select id="weightPerson"><option value="Dexter">Dexter</option><option value="Cheryl">Cheryl</option></select><input type="date" id="weightDate"><button class="small-btn btn-primary" onclick="addWeight()">➕ Log</button><button class="small-btn" onclick="copyProgressSummary()">📤 Copy Summary</button></div><div>${data.bodyWeight.map((w,idx)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${idx})">🗑️</button></div>`).join('')}</div></div>
       <h3>📜 History (${data.history.length})</h3><div class="import-export-bar"><button onclick="exportHistory()">📤 Export</button><button onclick="importHistoryPrompt()">📥 Import</button><button class="btn-danger" onclick="clearAllHistory()">🗑️ Clear All</button></div>
       <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; return `<div class="history-item"><div><b>${s.templateName}</b> <span style="color:var(--text-secondary);">${new Date(s.date).toLocaleString()}</span></div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
