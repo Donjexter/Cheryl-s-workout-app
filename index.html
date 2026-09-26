@@ -251,6 +251,9 @@
   .heatmap-cell.heat-3 { background: var(--accent); opacity: 1; }
   .heatmap-cell.future { visibility: hidden; }
   .heatmap-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+  .heatmap-month-label { height: 12px; font-size: 9px; color: var(--text-secondary); white-space: nowrap; }
+  .heatmap-daylabels { flex-shrink: 0; }
+  .heatmap-daylabel { width: 20px; height: 11px; font-size: 9px; line-height: 11px; color: var(--text-secondary); }
   .streak-cards { display: flex; gap: 10px; margin: 10px 0; }
   .streak-cards .person-card { flex: 1; text-align: center; }
   .streak-number { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
@@ -772,7 +775,11 @@
   }
   function buildHeatmapHtml(counts) {
     const { weeks, today } = buildHeatmapWeeks();
+    let lastMonth = null;
     const cols = weeks.map(week => {
+      const firstDay = week[0];
+      const month = firstDay.getMonth();
+      const monthLabel = month !== lastMonth ? (lastMonth = month, firstDay.toLocaleDateString(undefined, { month: 'short' })) : '';
       const cells = week.map(d => {
         if (d > today) return `<div class="heatmap-cell future"></div>`;
         const key = d.toISOString().slice(0, 10);
@@ -780,9 +787,11 @@
         const heat = n === 0 ? '' : n === 1 ? 'heat-1' : n === 2 ? 'heat-2' : 'heat-3';
         return `<div class="heatmap-cell ${heat}" title="${d.toLocaleDateString()}: ${n} session${n===1?'':'s'}"></div>`;
       }).join('');
-      return `<div class="heatmap-week">${cells}</div>`;
+      return `<div class="heatmap-week"><div class="heatmap-month-label">${monthLabel}</div>${cells}</div>`;
     }).join('');
-    return `<div class="heatmap-scroll"><div class="heatmap-grid">${cols}</div></div>
+    const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dayLabelsCol = `<div class="heatmap-week heatmap-daylabels"><div class="heatmap-month-label"></div>${dayLabels.map((d,i) => `<div class="heatmap-daylabel">${i % 2 === 1 ? d.slice(0,3) : ''}</div>`).join('')}</div>`;
+    return `<div style="display:flex; gap:4px;">${dayLabelsCol}<div class="heatmap-scroll"><div class="heatmap-grid">${cols}</div></div></div>
       <div class="heatmap-legend"><span>Less</span><div class="heatmap-cell"></div><div class="heatmap-cell heat-1"></div><div class="heatmap-cell heat-2"></div><div class="heatmap-cell heat-3"></div><span>More</span></div>`;
   }
   window.showConsistency = () => renderConsistency();
@@ -1233,6 +1242,53 @@
   };
   window.deleteHistoryEntry = (index) => { if(confirm('Delete this history entry?')){ data.history.splice(index,1); save(); renderHome(); } };
   window.clearAllHistory = () => { if(confirm('Delete ALL history?')){ data.history = []; save(); renderHome(); } };
+
+  // ----- EDIT HISTORY ENTRY DATE & TIME (additive) -----
+  // Lets you correct/backdate a logged session's date and time directly from
+  // the History list, without touching its exercises/sets. Only entry.date
+  // is changed. Tracked by object reference (not array index) because
+  // editing re-sorts data.history by date afterward (like bodyWeight already
+  // does), so an index captured before the sort could point at the wrong
+  // entry - the reference stays correct regardless of where the entry ends
+  // up in the array. Nothing else about the entry, or any other history
+  // entry, template, or setting, is affected.
+  let editingDateForHistoryEntry = null;
+  function toLocalDateInputValue(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  function toLocalTimeInputValue(d) { return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+  window.toggleEditHistoryDate = (index) => {
+    const entry = data.history[index];
+    if (!entry) return;
+    editingDateForHistoryEntry = editingDateForHistoryEntry === entry ? null : entry;
+    renderHome();
+  };
+  window.updateHistoryDate = (index, dateStr) => {
+    if (!dateStr) return;
+    const entry = data.history[index];
+    if (!entry) return;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (!y || !m || !d) return;
+    const newDate = new Date(entry.date);
+    if (isNaN(newDate.getTime())) newDate.setTime(Date.now());
+    newDate.setFullYear(y, m - 1, d);
+    entry.date = newDate.toISOString();
+    data.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+    save();
+    renderHome();
+  };
+  window.updateHistoryTime = (index, timeStr) => {
+    if (!timeStr) return;
+    const entry = data.history[index];
+    if (!entry) return;
+    const [h, min] = timeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(min)) return;
+    const newDate = new Date(entry.date);
+    if (isNaN(newDate.getTime())) newDate.setTime(Date.now());
+    newDate.setHours(h, min, 0, 0);
+    entry.date = newDate.toISOString();
+    data.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+    save();
+    renderHome();
+  };
   window.exportHistory = () => { const blob = new Blob([JSON.stringify(data.history,null,2)], {type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `workout_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); };
   window.importHistoryPrompt = () => { const input = document.createElement('input'); input.type='file'; input.accept='.json'; input.onchange = e => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=ev=>{ try{ const imported=JSON.parse(ev.target.result); if(Array.isArray(imported)){ data.history.push(...imported.filter(x=>x.templateName && x.logs)); save(); renderHome(); alert('Imported'); } }catch(e){ alert('Invalid'); } }; reader.readAsText(file); }; input.click(); };
   
@@ -1314,7 +1370,7 @@
       <div id="templateList">${data.templates.map(t=>`<div class="template-item template-item-tappable" onclick="startWorkout('${t.id}')"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="event.stopPropagation(); deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="event.stopPropagation(); selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
       <div class="weight-logging"><h3>⚖️ Log Weight</h3><div class="flex-row"><input type="number" id="newWeight" placeholder="Weight (kg)" step="0.1"><select id="weightPerson"><option value="Dexter">Dexter</option><option value="Cheryl">Cheryl</option></select><input type="date" id="weightDate"><button class="small-btn btn-primary" onclick="addWeight()">➕ Log</button><button class="small-btn" onclick="copyProgressSummary()">📤 Copy Summary</button></div><div>${data.bodyWeight.map((w,idx)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${idx})">🗑️</button></div>`).join('')}</div></div>
       <h3>📜 History (${data.history.length})</h3><div class="import-export-bar"><button onclick="exportHistory()">📤 Export</button><button onclick="importHistoryPrompt()">📥 Import</button><button class="btn-danger" onclick="clearAllHistory()">🗑️ Clear All</button></div>
-      <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; return `<div class="history-item"><div><b>${s.templateName}</b> <span style="color:var(--text-secondary);">${new Date(s.date).toLocaleString()}</span></div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
+      <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; const isEditingDate = editingDateForHistoryEntry===s; const entryDate = new Date(s.date); return `<div class="history-item"><div><b>${s.templateName}</b> ${isEditingDate ? `<span class="flex-row" style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;"><input type="date" value="${toLocalDateInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryDate(${realIdx}, this.value)"><input type="time" value="${toLocalTimeInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryTime(${realIdx}, this.value)"><button class="small-btn" onclick="toggleEditHistoryDate(${realIdx})">✔️ Done</button></span>` : `<span style="color:var(--text-secondary); cursor:pointer;" onclick="toggleEditHistoryDate(${realIdx})">${entryDate.toLocaleString()} 📅</span>`}</div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
     `;
     if (selectedShareIds.length) { let bar = document.getElementById('shareBar'); if(!bar){ bar=document.createElement('div'); bar.id='shareBar'; bar.className='sticky-share-bar'; app.appendChild(bar); } bar.innerHTML = `<span>${selectedShareIds.length} selected</span><button class="small-btn" onclick="copyShareLink()">📋 Copy link</button><button class="small-btn btn-danger" onclick="selectedShareIds=[]; renderHome();">✖ Clear</button>`; }
   }
