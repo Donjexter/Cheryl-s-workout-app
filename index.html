@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Workout Tracker · v3.3.3 (Themes, tap-editable timers, smart weight parsing)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) -----
@@ -84,9 +84,12 @@
     --warning: #c98a2c;
     --border: #cfcfd6;
   }
-  body.no-lovey .countdown,
-  body.no-lovey .weight-summary-cards,
-  body.no-lovey .weight-logging {
+  /* v3.7.0 FIX: Non-Lovey mode used to also hide the Weight summary cards and
+     Weight logging section entirely, which meant weight tracking silently
+     stopped working outside Lovey Mode. Per spec, the only thing Non-Lovey
+     Mode should hide is the anniversary countdown; weight logging now works
+     identically in both modes (see soloUserName / buildWeightTabHtml JS). */
+  body.no-lovey .countdown {
     display: none !important;
   }
 
@@ -101,7 +104,7 @@
     -webkit-font-smoothing: antialiased;
   }
   .container {
-    padding: 16px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px));
     max-width: 600px;
     margin: 0 auto;
     box-sizing: border-box;
@@ -342,8 +345,10 @@
   .person-card .delta {
     font-weight: bold;
   }
-  .delta.positive { color: var(--danger); }  /* gain = red */
-  .delta.negative { color: var(--accent); }   /* loss = green */
+  .delta.positive { color: var(--danger); }  /* weight gain = red */
+  .delta.negative { color: var(--accent); }   /* weight loss = accent */
+  .delta.trend-up { color: var(--accent); }   /* e.g. rising 1RM = good */
+  .delta.trend-down { color: var(--danger); } /* e.g. falling 1RM = attention */
   .weight-summary-cards {
     background: var(--surface);
     padding: 16px;
@@ -383,6 +388,16 @@
     margin-top: 8px;
     justify-content: flex-end;
   }
+  .exercise-card, .history-item, .template-item, .weight-item, .person-card {
+    overflow-wrap: anywhere;
+  }
+  .exercise-card > div[style*="space-between"],
+  .history-item > div[style*="space-between"] {
+    min-width: 0;
+  }
+  .exercise-card b, .history-item b, .template-item b {
+    overflow-wrap: anywhere;
+  }
   @media (max-width: 380px) {
     .container { padding: 12px 12px calc(20px + env(safe-area-inset-bottom, 0px)); }
     .timer { font-size: 28px; }
@@ -394,7 +409,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.3.3';
+  const APP_VERSION = '3.9.0';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -452,7 +467,7 @@
   let data;
 
   if (!stored) {
-    data = { templates: [...DEFAULT_TEMPLATES], activeWorkout: null, history: [], bodyWeight: [], theme: 'cute', loveyMode: true, version: APP_VERSION, exerciseTags: {}, oneRmFormula: 'brzycki', weightUsers: ['Dexter', 'Cheryl'] };
+    data = { templates: [...DEFAULT_TEMPLATES], activeWorkout: null, history: [], bodyWeight: [], theme: 'cute', loveyMode: true, version: APP_VERSION, exerciseTags: {}, oneRmFormula: 'brzycki', weightUsers: ['Dexter', 'Cheryl'], soloUserName: 'Me' };
   } else {
     let mergedTemplates = stored.templates || [];
     DEFAULT_TEMPLATES.forEach(def => { if (!mergedTemplates.some(t => t.id === def.id)) mergedTemplates.push(def); });
@@ -476,7 +491,10 @@
     // weight-logging dropdown. Defaults to the two names this app always
     // hardcoded, so every existing data.bodyWeight entry (person: 'Dexter'
     // or 'Cheryl') still matches a listed name with no data changes.
-    data = { templates: mergedTemplates, activeWorkout: stored.activeWorkout || null, history: stored.history || [], bodyWeight: stored.bodyWeight || [], theme: migratedTheme || 'cute', loveyMode: migratedLovey === undefined ? true : migratedLovey, version: APP_VERSION, exerciseTags: stored.exerciseTags || {}, oneRmFormula: stored.oneRmFormula || 'brzycki', weightUsers: stored.weightUsers || ['Dexter', 'Cheryl'] };
+    // soloUserName (v3.7.0, additive): the single person's name used for
+    // weight logging while in Non-Lovey Mode. Defaults to 'Me' and never
+    // affects Lovey Mode, which keeps using weightUsers exactly as before.
+    data = { templates: mergedTemplates, activeWorkout: stored.activeWorkout || null, history: stored.history || [], bodyWeight: stored.bodyWeight || [], theme: migratedTheme || 'cute', loveyMode: migratedLovey === undefined ? true : migratedLovey, version: APP_VERSION, exerciseTags: stored.exerciseTags || {}, oneRmFormula: stored.oneRmFormula || 'brzycki', weightUsers: stored.weightUsers || ['Dexter', 'Cheryl'], soloUserName: stored.soloUserName || 'Me' };
   }
   data.templates = data.templates.map(t => ({ id: t.id || 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2,8), ...t }));
   data.bodyWeight = data.bodyWeight.map(w => ({ ...w, person: w.person || 'Dexter' }));
@@ -610,7 +628,7 @@
   // render time via getCanonicalExerciseName + this lookup, so every past
   // session automatically picks up tags (including ones added later) without
   // any record being rewritten.
-  const MUSCLE_GROUPS = ['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Calves','Core'];
+  const MUSCLE_GROUPS = ['Chest','Back','Shoulders','Biceps','Triceps','Forearms','Quads','Hamstrings','Glutes','Calves','Core','Traps'];
   // Best-effort defaults for exercise names already present in this app
   // (default templates) plus common generic lift names, so a fresh install
   // starts mostly pre-tagged. Keyed by normalizeExerciseName() so spacing/
@@ -651,6 +669,248 @@
     [normalizeExerciseName('Shrugs')]: ['Back'],
     [normalizeExerciseName('Face Pull')]: ['Shoulders','Back']
   };
+  // ----- BUILT-IN EXERCISE DATABASE EXPANSION (v3.7.0, additive) -----
+  // A much larger catalog of common gym/bodybuilding/powerlifting/functional/
+  // machine/cable/dumbbell/barbell/bodyweight/cardio exercises, each with
+  // muscle-group tags. This only EXTENDS DEFAULT_EXERCISE_TAGS (adding a key
+  // only if one doesn't already exist for that normalized name) and offers
+  // these names as selectable options when adding an exercise - it never
+  // overwrites an existing tag, template, history entry, or exercise. Any
+  // exercise not in this list (a custom/renamed one) still works exactly as
+  // before via getExerciseTags()'s fallback to [] and the keyword-based
+  // Relative Strength detection above, which reads names, not this list.
+  const BUILT_IN_EXERCISE_DB = [
+    // Barbell
+    { name: 'Barbell Back Squat', tags: ['Quads','Glutes'] },
+    { name: 'Barbell Front Squat', tags: ['Quads','Glutes','Core'] },
+    { name: 'Barbell Bench Press', tags: ['Chest','Triceps','Shoulders'] },
+    { name: 'Barbell Incline Bench Press', tags: ['Chest','Shoulders','Triceps'] },
+    { name: 'Barbell Close Grip Bench Press', tags: ['Triceps','Chest'] },
+    { name: 'Conventional Deadlift', tags: ['Hamstrings','Back','Glutes'] },
+    { name: 'Sumo Deadlift', tags: ['Hamstrings','Glutes','Back'] },
+    { name: 'Barbell Overhead Press', tags: ['Shoulders','Triceps'] },
+    { name: 'Push Press', tags: ['Shoulders','Triceps','Quads'] },
+    { name: 'Barbell Bent Over Row', tags: ['Back','Biceps'] },
+    { name: 'Pendlay Row', tags: ['Back','Biceps'] },
+    { name: 'T-Bar Row', tags: ['Back','Biceps'] },
+    { name: 'Barbell Hip Thrust', tags: ['Glutes','Hamstrings'] },
+    { name: 'Barbell Walking Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Barbell Shrug', tags: ['Back'] },
+    { name: 'Barbell Curl', tags: ['Biceps'] },
+    { name: 'EZ Bar Curl', tags: ['Biceps'] },
+    { name: 'Skull Crushers', tags: ['Triceps'] },
+    // Dumbbell
+    { name: 'Dumbbell Bench Press', tags: ['Chest','Triceps','Shoulders'] },
+    { name: 'Dumbbell Incline Press', tags: ['Chest','Shoulders','Triceps'] },
+    { name: 'Dumbbell Shoulder Press', tags: ['Shoulders','Triceps'] },
+    { name: 'Dumbbell Single Arm Row', tags: ['Back','Biceps'] },
+    { name: 'Dumbbell Romanian Deadlift', tags: ['Hamstrings','Glutes'] },
+    { name: 'Dumbbell Goblet Squat', tags: ['Quads','Glutes'] },
+    { name: 'Dumbbell Lateral Raise', tags: ['Shoulders'] },
+    { name: 'Dumbbell Front Raise', tags: ['Shoulders'] },
+    { name: 'Dumbbell Curl', tags: ['Biceps'] },
+    { name: 'Dumbbell Hammer Curl', tags: ['Biceps'] },
+    { name: 'Dumbbell Tricep Extension', tags: ['Triceps'] },
+    { name: 'Dumbbell Fly', tags: ['Chest'] },
+    { name: 'Dumbbell Step Up', tags: ['Quads','Glutes'] },
+    { name: 'Dumbbell Farmer Carry', tags: ['Core','Back'] },
+    { name: 'Dumbbell Pullover', tags: ['Chest','Back'] },
+    // Machine / Cable
+    { name: 'Seated Cable Row', tags: ['Back','Biceps'] },
+    { name: 'Lat Pulldown', tags: ['Back','Biceps'] },
+    { name: 'Cable Chest Press', tags: ['Chest','Triceps'] },
+    { name: 'Cable Crossover', tags: ['Chest'] },
+    { name: 'Cable Tricep Pushdown', tags: ['Triceps'] },
+    { name: 'Cable Bicep Curl', tags: ['Biceps'] },
+    { name: 'Cable Face Pull', tags: ['Shoulders','Back'] },
+    { name: 'Cable Lateral Raise', tags: ['Shoulders'] },
+    { name: 'Leg Press Machine', tags: ['Quads','Glutes'] },
+    { name: 'Hack Squat Machine', tags: ['Quads','Glutes'] },
+    { name: 'Leg Extension Machine', tags: ['Quads'] },
+    { name: 'Seated Leg Curl Machine', tags: ['Hamstrings'] },
+    { name: 'Lying Leg Curl Machine', tags: ['Hamstrings'] },
+    { name: 'Chest Press Machine', tags: ['Chest','Triceps'] },
+    { name: 'Shoulder Press Machine', tags: ['Shoulders','Triceps'] },
+    { name: 'Smith Machine Squat', tags: ['Quads','Glutes'] },
+    { name: 'Smith Machine Bench Press', tags: ['Chest','Triceps'] },
+    { name: 'Assisted Pull-up Machine', tags: ['Back','Biceps'] },
+    { name: 'Hip Abduction Machine', tags: ['Glutes'] },
+    { name: 'Hip Adduction Machine', tags: ['Glutes'] },
+    { name: 'Pec Deck', tags: ['Chest'] },
+    { name: 'Cable Woodchopper', tags: ['Core'] },
+    { name: 'Cable Rear Delt Fly', tags: ['Shoulders','Back'] },
+    // Bodyweight / functional
+    { name: 'Pull-up', tags: ['Back','Biceps'] },
+    { name: 'Chin-up', tags: ['Back','Biceps'] },
+    { name: 'Push-up', tags: ['Chest','Triceps','Shoulders'] },
+    { name: 'Dip', tags: ['Triceps','Chest'] },
+    { name: 'Bodyweight Squat', tags: ['Quads','Glutes'] },
+    { name: 'Pistol Squat', tags: ['Quads','Glutes','Core'] },
+    { name: 'Walking Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Side Plank', tags: ['Core'] },
+    { name: 'Hanging Leg Raise', tags: ['Core'] },
+    { name: 'Mountain Climbers', tags: ['Core'] },
+    { name: 'Burpees', tags: ['Core','Quads'] },
+    { name: 'Box Jump', tags: ['Quads','Glutes','Calves'] },
+    { name: 'Kettlebell Swing', tags: ['Glutes','Hamstrings'] },
+    { name: 'Kettlebell Goblet Squat', tags: ['Quads','Glutes'] },
+    { name: 'Battle Ropes', tags: ['Shoulders','Core'] },
+    { name: "Farmer's Carry", tags: ['Core','Back'] },
+    { name: 'Glute Bridge', tags: ['Glutes','Hamstrings'] },
+    { name: 'Standing Calf Raise', tags: ['Calves'] },
+    { name: 'Seated Calf Raise', tags: ['Calves'] },
+    { name: 'Nordic Hamstring Curl', tags: ['Hamstrings'] },
+    { name: 'Back Extension', tags: ['Back','Hamstrings','Glutes'] },
+    { name: 'Sit-up', tags: ['Core'] },
+    { name: 'Russian Twist', tags: ['Core'] },
+    // Cardio
+    { name: 'Treadmill Run', tags: ['Quads','Calves'] },
+    { name: 'Stationary Bike', tags: ['Quads','Calves'] },
+    { name: 'Elliptical Trainer', tags: ['Quads','Glutes','Calves'] },
+    { name: 'Jump Rope', tags: ['Calves'] },
+    { name: 'Stair Climber', tags: ['Quads','Glutes','Calves'] },
+    { name: 'Incline Treadmill Walk', tags: ['Quads','Glutes','Calves'] },
+    // ----- v3.8.2 EXPANSION (additive) -----
+    // Barbell (more)
+    { name: 'Barbell Romanian Deadlift', tags: ['Hamstrings','Glutes'] },
+    { name: 'Deficit Deadlift', tags: ['Hamstrings','Back','Glutes'] },
+    { name: 'Trap Bar Deadlift', tags: ['Hamstrings','Glutes','Back','Traps'] },
+    { name: 'Rack Pull', tags: ['Back','Hamstrings','Traps'] },
+    { name: 'Good Morning', tags: ['Hamstrings','Back','Glutes'] },
+    { name: 'Zercher Squat', tags: ['Quads','Glutes','Core','Back'] },
+    { name: 'Box Squat', tags: ['Quads','Glutes'] },
+    { name: 'Pause Squat', tags: ['Quads','Glutes'] },
+    { name: 'Overhead Squat', tags: ['Quads','Glutes','Shoulders','Core'] },
+    { name: 'Barbell Reverse Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Barbell Step Up', tags: ['Quads','Glutes'] },
+    { name: 'Belt Squat', tags: ['Quads','Glutes'] },
+    { name: 'Landmine Press', tags: ['Shoulders','Triceps','Chest'] },
+    { name: 'Landmine Row', tags: ['Back','Biceps'] },
+    { name: 'Barbell Upright Row', tags: ['Shoulders','Traps'] },
+    { name: 'Barbell Preacher Curl', tags: ['Biceps'] },
+    { name: 'Spider Curl', tags: ['Biceps'] },
+    { name: 'Barbell Rollout', tags: ['Core'] },
+    { name: 'Power Clean', tags: ['Quads','Glutes','Back','Traps','Shoulders'] },
+    { name: 'Hang Clean', tags: ['Quads','Glutes','Back','Traps'] },
+    { name: 'Clean and Jerk', tags: ['Quads','Glutes','Shoulders','Back','Traps'] },
+    { name: 'Snatch', tags: ['Quads','Glutes','Shoulders','Back','Traps'] },
+    { name: 'Push Jerk', tags: ['Shoulders','Triceps','Quads'] },
+    { name: 'Barbell Wrist Curl', tags: ['Forearms'] },
+    { name: 'Barbell Reverse Wrist Curl', tags: ['Forearms'] },
+    { name: 'Behind the Neck Press', tags: ['Shoulders','Triceps'] },
+    // Dumbbell (more)
+    { name: 'Dumbbell Deadlift', tags: ['Hamstrings','Glutes','Back'] },
+    { name: 'Dumbbell Reverse Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Dumbbell Bulgarian Split Squat', tags: ['Quads','Glutes'] },
+    { name: 'Dumbbell Arnold Press', tags: ['Shoulders','Triceps'] },
+    { name: 'Dumbbell Renegade Row', tags: ['Back','Core','Biceps'] },
+    { name: 'Dumbbell Skull Crusher', tags: ['Triceps'] },
+    { name: 'Dumbbell Concentration Curl', tags: ['Biceps'] },
+    { name: 'Dumbbell Incline Curl', tags: ['Biceps'] },
+    { name: 'Dumbbell Zottman Curl', tags: ['Biceps','Forearms'] },
+    { name: 'Dumbbell Preacher Curl', tags: ['Biceps'] },
+    { name: 'Dumbbell Rear Delt Fly', tags: ['Shoulders','Back'] },
+    { name: 'Dumbbell Upright Row', tags: ['Shoulders','Traps'] },
+    { name: 'Dumbbell Shrug', tags: ['Traps'] },
+    { name: 'Dumbbell Wrist Curl', tags: ['Forearms'] },
+    { name: 'Dumbbell Suitcase Carry', tags: ['Core','Forearms'] },
+    { name: 'Dumbbell Thruster', tags: ['Quads','Glutes','Shoulders','Triceps'] },
+    { name: 'Dumbbell Man Maker', tags: ['Chest','Shoulders','Core','Quads'] },
+    { name: 'Single Arm Dumbbell Snatch', tags: ['Shoulders','Back','Glutes'] },
+    { name: 'Dumbbell Floor Press', tags: ['Chest','Triceps'] },
+    { name: 'Dumbbell Windmill', tags: ['Core','Shoulders'] },
+    // Machine / Cable (more)
+    { name: 'Cable Straight Arm Pulldown', tags: ['Back'] },
+    { name: 'Cable Pullover', tags: ['Back','Chest'] },
+    { name: 'Single Arm Cable Row', tags: ['Back','Biceps'] },
+    { name: 'Cable Kickback', tags: ['Triceps'] },
+    { name: 'Cable Overhead Tricep Extension', tags: ['Triceps'] },
+    { name: 'Cable Preacher Curl', tags: ['Biceps'] },
+    { name: 'Reverse Pec Deck', tags: ['Shoulders','Back'] },
+    { name: 'Chest Supported Row Machine', tags: ['Back','Biceps'] },
+    { name: 'High Row Machine', tags: ['Back','Biceps'] },
+    { name: 'Low Row Machine', tags: ['Back','Biceps'] },
+    { name: 'Glute Kickback Machine', tags: ['Glutes'] },
+    { name: 'Standing Calf Raise Machine', tags: ['Calves'] },
+    { name: 'Ab Crunch Machine', tags: ['Core'] },
+    { name: 'Torso Rotation Machine', tags: ['Core'] },
+    { name: 'Cable Crunch', tags: ['Core'] },
+    { name: 'Reverse Hyperextension', tags: ['Back','Glutes','Hamstrings'] },
+    { name: 'Multi-Hip Machine', tags: ['Glutes'] },
+    { name: 'Smith Machine Row', tags: ['Back','Biceps'] },
+    { name: 'Smith Machine Overhead Press', tags: ['Shoulders','Triceps'] },
+    { name: 'Smith Machine Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Machine Shrug', tags: ['Traps'] },
+    { name: 'Forearm Curl Machine', tags: ['Forearms'] },
+    { name: 'Preacher Curl Machine', tags: ['Biceps'] },
+    { name: 'Hip Thrust Machine', tags: ['Glutes','Hamstrings'] },
+    { name: 'Donkey Calf Raise', tags: ['Calves'] },
+    { name: 'Calf Press on Leg Press', tags: ['Calves'] },
+    // Bodyweight / Calisthenics (more)
+    { name: 'Diamond Push-up', tags: ['Triceps','Chest'] },
+    { name: 'Decline Push-up', tags: ['Chest','Shoulders','Triceps'] },
+    { name: 'Incline Push-up', tags: ['Chest','Shoulders','Triceps'] },
+    { name: 'Archer Push-up', tags: ['Chest','Triceps'] },
+    { name: 'Close Grip Push-up', tags: ['Triceps','Chest'] },
+    { name: 'Pike Push-up', tags: ['Shoulders','Triceps'] },
+    { name: 'Handstand Push-up', tags: ['Shoulders','Triceps'] },
+    { name: 'Muscle-up', tags: ['Back','Biceps','Chest','Triceps'] },
+    { name: 'Australian Row', tags: ['Back','Biceps'] },
+    { name: 'Inverted Row', tags: ['Back','Biceps'] },
+    { name: 'Wall Sit', tags: ['Quads'] },
+    { name: 'Step-up', tags: ['Quads','Glutes'] },
+    { name: 'Reverse Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Curtsy Lunge', tags: ['Quads','Glutes'] },
+    { name: 'Single Leg Glute Bridge', tags: ['Glutes','Hamstrings'] },
+    { name: 'Bicycle Crunch', tags: ['Core'] },
+    { name: 'Leg Raise', tags: ['Core'] },
+    { name: 'V-Up', tags: ['Core'] },
+    { name: 'Dead Bug', tags: ['Core'] },
+    { name: 'Bird Dog', tags: ['Core','Back'] },
+    { name: 'Superman', tags: ['Back','Glutes'] },
+    { name: 'Broad Jump', tags: ['Quads','Glutes','Calves'] },
+    { name: 'Tuck Jump', tags: ['Quads','Calves'] },
+    { name: 'Bear Crawl', tags: ['Core','Shoulders'] },
+    { name: 'Ab Wheel Rollout', tags: ['Core'] },
+    { name: 'Hollow Body Hold', tags: ['Core'] },
+    { name: 'L-Sit', tags: ['Core'] },
+    // Kettlebell (more)
+    { name: 'Kettlebell Clean', tags: ['Glutes','Hamstrings','Back'] },
+    { name: 'Kettlebell Snatch', tags: ['Shoulders','Glutes','Back'] },
+    { name: 'Kettlebell Turkish Get-up', tags: ['Core','Shoulders'] },
+    { name: 'Kettlebell Windmill', tags: ['Core','Shoulders'] },
+    { name: 'Kettlebell Row', tags: ['Back','Biceps'] },
+    { name: 'Kettlebell Halo', tags: ['Shoulders','Core'] },
+    { name: 'Kettlebell Deadlift', tags: ['Hamstrings','Glutes','Back'] },
+    { name: 'Kettlebell Overhead Press', tags: ['Shoulders','Triceps'] },
+    { name: 'Kettlebell Figure 8', tags: ['Core','Glutes'] },
+    // Grip / Traps / Forearms
+    { name: 'Wrist Roller', tags: ['Forearms'] },
+    { name: 'Plate Pinch Hold', tags: ['Forearms'] },
+    { name: 'Behind the Back Shrug', tags: ['Traps'] },
+    { name: "Trap Bar Farmer's Walk", tags: ['Traps','Forearms','Core'] },
+    { name: 'Dead Hang', tags: ['Forearms','Back'] },
+    // Bands / Accessory
+    { name: 'Band Pull Apart', tags: ['Shoulders','Back'] },
+    { name: 'Resistance Band Row', tags: ['Back','Biceps'] },
+    { name: 'Resistance Band Squat', tags: ['Quads','Glutes'] },
+    { name: 'Band Face Pull', tags: ['Shoulders','Back'] },
+    { name: 'Lateral Band Walk', tags: ['Glutes'] },
+    { name: 'Banded Monster Walk', tags: ['Glutes'] },
+    // Cardio / Conditioning (more)
+    { name: 'Rowing Machine', tags: ['Back','Quads'] },
+    { name: 'Assault Bike', tags: ['Quads','Shoulders'] },
+    { name: 'Sled Push', tags: ['Quads','Glutes','Core'] },
+    { name: 'Sled Drag', tags: ['Hamstrings','Back'] },
+    { name: 'Swimming', tags: ['Shoulders','Back','Core'] },
+    { name: 'Ski Erg', tags: ['Shoulders','Back','Core'] },
+    { name: 'Wall Ball', tags: ['Quads','Glutes','Shoulders'] }
+  ];
+  BUILT_IN_EXERCISE_DB.forEach(e => {
+    const key = normalizeExerciseName(e.name);
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_EXERCISE_TAGS, key)) DEFAULT_EXERCISE_TAGS[key] = e.tags;
+  });
+  const BUILT_IN_EXERCISE_NAMES = BUILT_IN_EXERCISE_DB.map(e => e.name);
   function getDefaultTagsFor(name) { return DEFAULT_EXERCISE_TAGS[normalizeExerciseName(name)] || []; }
   // Explicit user tags (even an emptied-out array) always win over defaults;
   // otherwise fall back to the pre-tagged default, if any.
@@ -666,6 +926,172 @@
     setExerciseTags(canonicalName, current);
   };
   window.toggleEditTagsFor = (canonicalName) => { editingTagsFor = editingTagsFor === canonicalName ? null : canonicalName; renderInsights(); };
+
+  // ----- EXERCISE MANAGEMENT: RENAME & MERGE (v3.8.0, additive) -----
+  // Core consolidation routine used by BOTH rename and merge (a rename is
+  // just a 1-source merge): rewrites every raw exercise-name string in
+  // data.history, data.templates, and the in-progress data.activeWorkout
+  // (if any) that NORMALIZES to one of the given source names, to a single
+  // exact target string. This is deliberately more thorough than the
+  // existing canonical-name lookup used elsewhere (getCanonicalExerciseName),
+  // which only picks a DISPLAY name without touching stored records - here
+  // we actually rewrite the stored strings so every consumer that matches by
+  // exact name (getOneRmHistory, getExercisePRs, getPastPerformance, the
+  // Relative Strength keyword scan, etc.) sees one combined history/PR/chart
+  // instead of one fragment per spelling variant. Tags from every merged
+  // source are unioned onto the target; nothing is deleted, only renamed/
+  // combined, so no workout, set, or bodyweight entry is ever lost.
+  function consolidateExerciseNames(sourceNames, targetNameRaw) {
+    const targetName = (targetNameRaw || '').trim();
+    if (!targetName || !sourceNames || !sourceNames.length) return false;
+    const sourceNorms = new Set(sourceNames.map(normalizeExerciseName));
+    sourceNorms.add(normalizeExerciseName(targetName)); // also pulls in any existing exercise the target name already matches
+    data.history.forEach(entry => { entry.logs.forEach(l => { if (sourceNorms.has(normalizeExerciseName(l.name))) l.name = targetName; }); });
+    data.templates.forEach(t => { t.exercises.forEach(e => { if (sourceNorms.has(normalizeExerciseName(e.name))) e.name = targetName; }); });
+    if (data.activeWorkout && data.activeWorkout.logs) { data.activeWorkout.logs.forEach(l => { if (sourceNorms.has(normalizeExerciseName(l.name))) l.name = targetName; }); }
+    // Union every matched name's tags onto the target, then drop the old keys.
+    let mergedTags = [];
+    Object.keys(data.exerciseTags).forEach(k => { if (sourceNorms.has(normalizeExerciseName(k))) (data.exerciseTags[k] || []).forEach(t => { if (!mergedTags.includes(t)) mergedTags.push(t); }); });
+    Object.keys(data.exerciseTags).forEach(k => { if (sourceNorms.has(normalizeExerciseName(k))) delete data.exerciseTags[k]; });
+    if (mergedTags.length) data.exerciseTags[targetName] = mergedTags;
+    // Keep transient UI selections (Progress chart exercise, expanded tag row) pointing at something that still exists.
+    if (progressExercise && sourceNorms.has(normalizeExerciseName(progressExercise))) progressExercise = targetName;
+    if (editingTagsFor && sourceNorms.has(normalizeExerciseName(editingTagsFor))) editingTagsFor = targetName;
+    save();
+    return true;
+  }
+  // Per-exercise usage (session count + last-used date), grouping raw log
+  // names by the same normalized-name logic used everywhere else in the app.
+  // Read-only; used for sorting/context in the Exercise Management tab.
+  function getExerciseUsageStats() {
+    const map = buildCanonicalExerciseMap();
+    const stats = {};
+    data.history.forEach(entry => {
+      entry.logs.forEach(l => {
+        const canonical = map.get(normalizeExerciseName(l.name)) || l.name;
+        if (!stats[canonical]) stats[canonical] = { sessions: 0, lastUsed: null };
+        stats[canonical].sessions++;
+        const d = new Date(entry.date);
+        if (!stats[canonical].lastUsed || d > stats[canonical].lastUsed) stats[canonical].lastUsed = d;
+      });
+    });
+    getAllUniqueCanonicalExercises().forEach(name => { if (!stats[name]) stats[name] = { sessions: 0, lastUsed: null }; });
+    return stats;
+  }
+  // Simple duplicate-name detector: flags pairs whose normalized forms are
+  // near-identical (Levenshtein similarity) or where one is a substantial
+  // substring of the other (e.g. "Bench Press" inside "Barbell Bench
+  // Press"), so common naming variants surface as merge suggestions.
+  function levenshteinDistance(a, b) {
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    return dp[m][n];
+  }
+  function nameSimilarity(a, b) {
+    const na = normalizeExerciseName(a), nb = normalizeExerciseName(b);
+    if (!na || !nb) return 0;
+    if (na === nb) return 1;
+    const longer = na.length >= nb.length ? na : nb, shorter = na.length >= nb.length ? nb : na;
+    const containment = shorter.length >= 4 && longer.includes(shorter);
+    const ratio = 1 - levenshteinDistance(na, nb) / Math.max(na.length, nb.length);
+    return containment ? Math.max(ratio, 0.8) : ratio;
+  }
+  function getDuplicateSuggestions(names) {
+    const suggestions = [];
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        const sim = nameSimilarity(names[i], names[j]);
+        if (sim >= 0.6) suggestions.push({ a: names[i], b: names[j], sim });
+      }
+    }
+    suggestions.sort((x, y) => y.sim - x.sim);
+    return suggestions.slice(0, 8);
+  }
+  let exerciseMgmtSearch = '';
+  let exerciseMgmtSort = 'name'; // 'name' | 'mostused' | 'recent'
+  let selectedForMerge = [];
+  window.showExerciseManagement = () => showInsights('exercises');
+  window.setExerciseMgmtSearch = (v) => { exerciseMgmtSearch = v; renderInsights(); };
+  window.setExerciseMgmtSort = (v) => { exerciseMgmtSort = v; renderInsights(); };
+  window.toggleMergeSelect = (name) => { const i = selectedForMerge.indexOf(name); if (i === -1) selectedForMerge.push(name); else selectedForMerge.splice(i, 1); renderInsights(); };
+  window.clearMergeSelection = () => { selectedForMerge = []; renderInsights(); };
+  // Renaming a single exercise IS a 1-source merge. If the new name
+  // normalizes to a name that's already a different existing exercise, that
+  // exercise's history gets folded in too - flagged with a confirm first so
+  // it's never a silent surprise.
+  window.renameManagedExercise = (oldName) => {
+    const newName = prompt(`Rename "${oldName}" to:`, oldName);
+    if (!newName || !newName.trim() || newName.trim() === oldName) return;
+    const trimmed = newName.trim();
+    const norm = normalizeExerciseName(trimmed);
+    const collidesWith = getAllUniqueCanonicalExercises().find(n => n !== oldName && normalizeExerciseName(n) === norm);
+    if (collidesWith && !confirm(`An exercise named "${collidesWith}" already exists. Renaming will merge "${oldName}" into it, combining all history, PRs, and charts. Continue?`)) return;
+    consolidateExerciseNames([oldName], trimmed);
+    selectedForMerge = selectedForMerge.filter(n => n !== oldName);
+    renderInsights();
+  };
+  window.mergeSelectedExercises = () => {
+    if (selectedForMerge.length < 2) { alert('Select at least 2 exercises to merge.'); return; }
+    const stats = getExerciseUsageStats();
+    const defaultTarget = selectedForMerge.slice().sort((a, b) => (stats[b]?.sessions || 0) - (stats[a]?.sessions || 0))[0];
+    const target = prompt(`Merge these into one exercise:\n${selectedForMerge.join('\n')}\n\nFinal name to keep:`, defaultTarget);
+    if (!target || !target.trim()) return;
+    if (!confirm(`Merge ${selectedForMerge.length} exercises into "${target.trim()}"? This combines their history, PRs, and charts - it can't be undone automatically.`)) return;
+    consolidateExerciseNames(selectedForMerge, target.trim());
+    selectedForMerge = [];
+    renderInsights();
+  };
+  window.mergeSuggestedPair = (a, b) => { selectedForMerge = [a, b]; window.mergeSelectedExercises(); };
+  function buildExerciseManagementTabHtml() {
+    const stats = getExerciseUsageStats();
+    const allNames = getAllUniqueCanonicalExercises();
+    let names = allNames;
+    if (exerciseMgmtSearch.trim()) { const q = exerciseMgmtSearch.trim().toLowerCase(); names = names.filter(n => n.toLowerCase().includes(q)); }
+    if (exerciseMgmtSort === 'mostused') names = names.slice().sort((a, b) => (stats[b]?.sessions || 0) - (stats[a]?.sessions || 0));
+    else if (exerciseMgmtSort === 'recent') names = names.slice().sort((a, b) => (stats[b]?.lastUsed?.getTime() || 0) - (stats[a]?.lastUsed?.getTime() || 0));
+    else names = names.slice().sort((a, b) => a.localeCompare(b));
+    const esc = s => s.replace(/'/g, "\\'");
+    const suggestions = getDuplicateSuggestions(allNames);
+    const suggestionsHtml = suggestions.length ? `
+      <h4>🔍 Possible duplicates</h4>
+      ${suggestions.map(s => `<div class="exercise-card flex-row" style="justify-content:space-between; align-items:center;"><span>"${s.a}" ↔ "${s.b}"</span><button class="small-btn btn-primary" onclick="mergeSuggestedPair('${esc(s.a)}','${esc(s.b)}')">🔀 Merge</button></div>`).join('')}
+    ` : '';
+    const rows = names.length ? names.map(name => {
+      const s = stats[name] || { sessions: 0, lastUsed: null };
+      const checked = selectedForMerge.includes(name);
+      return `
+        <div class="exercise-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <label style="display:flex; align-items:center; gap:8px; flex:1; cursor:pointer; margin:0;">
+              <input type="checkbox" style="width:auto; margin:0;" ${checked ? 'checked' : ''} onchange="toggleMergeSelect('${esc(name)}')">
+              <b>${name}</b>
+            </label>
+            <button class="small-btn" onclick="renameManagedExercise('${esc(name)}')">✏️ Rename</button>
+          </div>
+          <div style="color:var(--text-secondary); font-size:0.85em; margin-top:2px;">${s.sessions} session${s.sessions === 1 ? '' : 's'}${s.lastUsed ? ' · last used ' + s.lastUsed.toLocaleDateString() : ''}</div>
+        </div>
+      `;
+    }).join('') : `<p>${exerciseMgmtSearch ? 'No exercises match your search.' : 'No exercises yet - add some to your templates or log a Quick Workout first.'}</p>`;
+    const mergeBar = selectedForMerge.length ? `<div class="sticky-share-bar"><span>${selectedForMerge.length} selected</span><button class="small-btn btn-primary" onclick="mergeSelectedExercises()">🔀 Merge Selected</button><button class="small-btn" onclick="clearMergeSelection()">✖ Clear</button></div>` : '';
+    return `
+      <h3 style="margin-top:0;">🗂️ Exercise Management</h3>
+      <input type="text" placeholder="🔎 Search exercises..." value="${exerciseMgmtSearch.replace(/"/g,'&quot;')}" onchange="setExerciseMgmtSearch(this.value)">
+      <div class="flex-row">
+        <button class="small-btn ${exerciseMgmtSort==='name'?'btn-primary':''}" onclick="setExerciseMgmtSort('name')">A–Z</button>
+        <button class="small-btn ${exerciseMgmtSort==='mostused'?'btn-primary':''}" onclick="setExerciseMgmtSort('mostused')">Most Used</button>
+        <button class="small-btn ${exerciseMgmtSort==='recent'?'btn-primary':''}" onclick="setExerciseMgmtSort('recent')">Recently Used</button>
+      </div>
+      ${suggestionsHtml}
+      <h4>All Exercises (${names.length}${names.length !== allNames.length ? ' of ' + allNames.length : ''})</h4>
+      <p style="color:var(--text-secondary); font-size:0.85em;">Select 2+ and merge, or rename one directly - both combine every historical log, chart, PR and progression entry for the exercise(s) into one.</p>
+      ${rows}
+      ${mergeBar}
+    `;
+  }
 
   // Sums completed sets per muscle group across history (optionally limited
   // to the last N days), crediting every tag an exercise has in full (a
@@ -886,6 +1312,105 @@
     `;
   }
 
+  // ----- RELATIVE STRENGTH ANALYTICS (v3.7.0, additive, read-only) -----
+  // Compares each major lift's best-ever logged weight against the most
+  // recent bodyweight entry for the selected person, expressed as a
+  // bodyweight multiple ("1.6x bodyweight") with a Beginner..Elite level.
+  // Keyword detection (not exact-name matching) means user-renamed/custom
+  // exercises (e.g. "Dex Row Variation") are picked up automatically, same
+  // as any built-in exercise, as long as the name contains a known keyword.
+  // Purely computed from existing data.history / data.bodyWeight - nothing
+  // is written anywhere.
+  const LIFT_KEYWORDS = [
+    { keys: ['squat'], lift: 'Squat' },
+    { keys: ['bench'], lift: 'Bench Press' },
+    { keys: ['deadlift', 'rdl'], lift: 'Deadlift' },
+    { keys: ['ohp', 'overhead press', 'shoulder press'], lift: 'Overhead Press' },
+    { keys: ['row'], lift: 'Row' }
+  ];
+  function detectLiftCategory(exerciseName) {
+    const norm = exerciseName.toLowerCase();
+    for (const entry of LIFT_KEYWORDS) { if (entry.keys.some(k => norm.includes(k))) return entry.lift; }
+    return null;
+  }
+  const STRENGTH_LEVELS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
+  // Approximate bodyweight-multiple thresholds for entering each level, and
+  // a rough "top X%" figure per level. These are general estimates (not
+  // pulled from a live population dataset) meant to give a sense of where a
+  // lift sits - labeled as such in the UI.
+  const STRENGTH_STANDARDS = {
+    'Squat':          [0.5, 0.75, 1.25, 1.75, 2.25],
+    'Bench Press':    [0.5, 0.75, 1.0,  1.5,  2.0],
+    'Deadlift':       [0.75, 1.0,  1.5,  2.0,  2.5],
+    'Overhead Press': [0.35, 0.5, 0.75, 1.0,  1.35],
+    'Row':            [0.5, 0.75, 1.0,  1.5,  2.0]
+  };
+  const STRENGTH_PERCENTILE_TOP = [85, 65, 40, 18, 5]; // "roughly top X%" per level index
+  function getStrengthLevelIndex(lift, ratio) {
+    const thresholds = STRENGTH_STANDARDS[lift];
+    if (!thresholds || ratio === null) return -1;
+    let idx = -1;
+    thresholds.forEach((t, i) => { if (ratio >= t) idx = i; });
+    return idx;
+  }
+  // Best all-time heaviest weight per detected lift category, across every
+  // canonical exercise (built-in or custom) whose name matches that
+  // category's keywords - e.g. "Back Squat" and "Goblet Squat" both feed
+  // into "Squat", and the heavier of the two wins.
+  function getRelativeStrengthRows(bodyweight) {
+    const byLift = {};
+    getAllUniqueCanonicalExercises().forEach(name => {
+      const lift = detectLiftCategory(name);
+      if (!lift) return;
+      const prs = getExercisePRs(name);
+      if (!prs || prs.maxWeight === null) return;
+      if (!byLift[lift] || prs.maxWeight > byLift[lift].maxWeight) byLift[lift] = { maxWeight: prs.maxWeight, exerciseName: name, date: prs.maxWeightDate };
+    });
+    return Object.keys(byLift).map(lift => {
+      const { maxWeight, exerciseName, date } = byLift[lift];
+      const ratio = bodyweight > 0 ? Math.round((maxWeight / bodyweight) * 100) / 100 : null;
+      const levelIdx = getStrengthLevelIndex(lift, ratio);
+      return {
+        lift, exerciseName, maxWeight, ratio, date,
+        level: levelIdx >= 0 ? STRENGTH_LEVELS[levelIdx] : 'Below Beginner',
+        percentile: levelIdx >= 0 ? STRENGTH_PERCENTILE_TOP[levelIdx] : null
+      };
+    }).sort((a, b) => a.lift.localeCompare(b.lift));
+  }
+  let relativeStrengthPerson = null;
+  window.setRelativeStrengthPerson = (p) => { relativeStrengthPerson = p; renderInsights(); };
+  window.showRelativeStrength = () => showInsights('strength');
+  function buildRelativeStrengthTabHtml() {
+    const persons = data.loveyMode ? getAllWeightPersons() : [data.soloUserName];
+    const withEntries = persons.filter(p => data.bodyWeight.some(w => w.person === p));
+    if (!withEntries.length) {
+      return `<h3 style="margin-top:0;">💪 Relative Strength</h3><p>Log a bodyweight entry on the ⚖️ Weight tab, plus some squat/bench/deadlift/overhead-press/row sets, to see this.</p>`;
+    }
+    if (!relativeStrengthPerson || !withEntries.includes(relativeStrengthPerson)) {
+      const mostRecent = data.bodyWeight.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).find(w => withEntries.includes(w.person));
+      relativeStrengthPerson = mostRecent ? mostRecent.person : withEntries[0];
+    }
+    const personPicker = withEntries.length > 1
+      ? `<label>Person:</label><select onchange="setRelativeStrengthPerson(this.value)">${withEntries.map(p => `<option value="${p.replace(/"/g,'&quot;')}" ${p===relativeStrengthPerson?'selected':''}>${p}</option>`).join('')}</select>`
+      : '';
+    const entries = data.bodyWeight.filter(w => w.person === relativeStrengthPerson);
+    const bodyweight = entries[entries.length - 1].weight;
+    const rows = getRelativeStrengthRows(bodyweight);
+    const cards = rows.length ? rows.map(r => `
+      <div class="exercise-card">
+        <b>${r.lift}</b> <span style="color:var(--text-secondary); font-size:0.85em;">(best: ${r.exerciseName})</span>
+        <div style="margin-top:4px;">Heaviest logged: <b>${r.maxWeight}kg</b> · Bodyweight: <b>${bodyweight}kg</b></div>
+        ${r.ratio !== null ? `<div class="delta" style="margin-top:4px;">Your ${r.lift.toLowerCase()} is ${r.ratio}× bodyweight. <b>${r.level}</b>.</div>${r.percentile !== null ? `<div style="color:var(--text-secondary); font-size:0.85em;">Roughly top ${r.percentile}% for ${r.lift.toLowerCase()} strength at your bodyweight (estimate).</div>` : ''}` : ''}
+      </div>
+    `).join('') : `<p>No squat/bench/deadlift/overhead-press/row lifts logged yet for ${relativeStrengthPerson}. Any exercise name containing those keywords (built-in or custom) will show up here automatically.</p>`;
+    return `
+      <h3 style="margin-top:0;">💪 Relative Strength</h3>
+      ${personPicker}
+      ${cards}
+      <p style="color:var(--text-secondary); font-size:0.8em; margin-top:14px;">Levels and percentiles are rough general estimates based on common bodyweight-ratio strength standards, not a live population sample.</p>
+    `;
+  }
+
   function buildOneRmChartSvg(points) {
     const w = 560, h = 220, padL = 45, padR = 15, padT = 15, padB = 30;
     const values = points.map(p => p.oneRM);
@@ -1004,7 +1529,10 @@
   window.addWeight = () => {
     const weight = parseFloat(document.getElementById('newWeight')?.value);
     if (isNaN(weight) || weight <= 0) return alert('Valid weight');
-    const person = document.getElementById('weightPerson')?.value || (data.weightUsers[0] || 'Me');
+    // v3.7.0: Non-Lovey Mode logs weight for the single user-defined person
+    // (data.soloUserName) instead of the Lovey Mode person dropdown, which
+    // isn't rendered in that mode. Lovey Mode logic is completely unchanged.
+    const person = data.loveyMode ? (document.getElementById('weightPerson')?.value || (data.weightUsers[0] || 'Me')) : data.soloUserName;
     let date = document.getElementById('weightDate')?.value ? new Date(document.getElementById('weightDate').value + 'T12:00:00') : new Date();
     data.bodyWeight.push({ date: date.toISOString(), weight, person });
     data.bodyWeight.sort((a,b) => new Date(a.date) - new Date(b.date));
@@ -1012,7 +1540,41 @@
     renderInsights();
   };
   window.deleteWeight = (idx) => { if (confirm('Delete entry?')) { data.bodyWeight.splice(idx,1); save(); renderInsights(); } };
-  window.copyProgressSummary = () => { /* same as before, kept for brevity, not modified */ alert("Summary copied (legacy)"); };
+  // ----- SOLO (NON-LOVEY) WEIGHT-TRACKING NAME (v3.7.0, additive) -----
+  // Non-Lovey Mode = "one user-defined person" per spec: instead of the
+  // Lovey Mode add/remove-person list, there's a single editable name used
+  // for every entry logged while not in Lovey Mode. Existing entries logged
+  // under any other person name (e.g. from before switching modes) are kept
+  // untouched in data.bodyWeight and remain visible/exportable; they're just
+  // not shown on the single-person Non-Lovey summary card.
+  window.renameSoloUser = () => {
+    const name = prompt('Your name:', data.soloUserName);
+    if (!name || !name.trim()) return;
+    data.soloUserName = name.trim();
+    save();
+    renderInsights();
+  };
+  // FIX: this used to be a stub that claimed "Summary copied" without
+  // actually copying (or computing) anything. Now builds a real per-person
+  // weight-progress summary from data.bodyWeight and copies it, with actual
+  // success/error feedback instead of a hardcoded fake success message.
+  window.copyProgressSummary = () => {
+    const persons = data.loveyMode ? getAllWeightPersons() : [data.soloUserName];
+    const lines = persons.map(p => {
+      const w = data.bodyWeight.filter(w => w.person === p);
+      if (!w.length) return `${p}: no entries yet`;
+      const first = w[0], last = w[w.length - 1];
+      const delta = Math.round((last.weight - first.weight) * 10) / 10;
+      const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '●');
+      return `${p}: ${first.weight}kg (${new Date(first.date).toLocaleDateString()}) → ${last.weight}kg (${new Date(last.date).toLocaleDateString()}) ${arrow} ${Math.abs(delta)}kg`;
+    });
+    const summary = lines.join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(summary).then(() => alert('Summary copied!')).catch(() => alert('Could not copy automatically. Here is the summary:\n\n' + summary));
+    } else {
+      alert('Clipboard not available. Here is the summary:\n\n' + summary);
+    }
+  };
   window.createTemplate = () => {
     const name = prompt("Template Name:");
     if (!name || !name.trim()) return;
@@ -1324,12 +1886,17 @@
   };
   window.endWorkout = () => {
     if (!data.activeWorkout) return renderHome();
+    // FIX: Cancelling this dialog used to be treated as "discard the whole
+    // workout", with no way back once you'd clicked "End Workout" - a single
+    // misclick could silently wipe an entire in-progress session. Cancel now
+    // safely resumes the workout instead; discarding requires an explicit
+    // second confirmation.
     if (data.activeWorkout.editingHistoryIndex !== undefined) {
       if (confirm('Save changes to history?')) finishWorkout(true);
-      else { data.activeWorkout = null; clearTimer(); save(); renderHome(); }
+      else if (confirm('Discard your changes and keep the original entry? (Cancel to keep editing)')) { data.activeWorkout = null; clearTimer(); save(); renderHome(); }
     } else {
       if (confirm('Save current progress to history?')) finishWorkout(true);
-      else { data.activeWorkout = null; clearTimer(); save(); renderHome(); }
+      else if (confirm('Discard this workout with no changes saved? (Cancel to keep working out)')) { data.activeWorkout = null; clearTimer(); save(); renderHome(); }
     }
   };
   window.cancelEdit = () => { if(confirm('Discard changes?')){ data.activeWorkout = null; clearTimer(); save(); renderHome(); } };
@@ -1353,39 +1920,53 @@
   // check w.isQuickWorkout anywhere. It is safe to call for a template-based workout in
   // progress OR for a saved history entry opened via editHistoryEntry(). Function names
   // were intentionally left unchanged to avoid breaking anything.
-  function renderAddExercise() {
+  // v3.9.0 CHANGE: the old long <select> (every exercise you've ever used, plus
+  // the entire built-in exercise database, all in one dropdown) was hard to
+  // scan on a phone. Replaced with a text input backed by a <datalist>: typing
+  // filters suggestions live (autofill), and tapping the input still shows a
+  // native suggestion list, so it behaves like a searchable dropdown. Typing a
+  // name that isn't suggested is still accepted as a brand-new exercise -
+  // exactly as free-typing "Add new exercise..." did before, just without the
+  // extra toggle/step. By default only exercises you've actually used appear
+  // (so the list starts short and relevant); "Show all exercises" reveals the
+  // full built-in database too, for once you've exhausted your own history.
+  let addExerciseShowAll = false;
+  function renderAddExercise(prefill) {
     const canonicalNames = getAllUniqueCanonicalExercises();
+    // v3.7.0, additive: also offer built-in database exercises that haven't
+    // been used yet, so the picker isn't limited to exercises already in
+    // your templates/history. Dedup by normalized name so a built-in never
+    // shows twice next to a user's already-used exercise of the same name.
+    const usedNorm = new Set(canonicalNames.map(normalizeExerciseName));
+    const dbOnlyNames = BUILT_IN_EXERCISE_NAMES.filter(n => !usedNorm.has(normalizeExerciseName(n)));
+    const optionNames = (addExerciseShowAll ? canonicalNames.concat(dbOnlyNames) : canonicalNames).sort((a, b) => a.localeCompare(b));
     const app = document.getElementById("app");
     app.innerHTML = `
       <button onclick="goToDashboard()">← Back to Workout</button>
       <h2>Add Exercise (smart search: ignores dashes/spaces/case)</h2>
-      <label>Choose exercise:</label>
-      <select id="exercise-select" onchange="toggleNewExerciseInput()">
-        <option value="">-- Select --</option>
-        ${canonicalNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">${name}</option>`).join('')}
-        <option value="__new__">➕ Add new exercise...</option>
-      </select>
-      <div id="new-exercise-container" style="display: none; margin-top: 10px;">
-        <label>New exercise name (will be normalized to avoid duplicates):</label>
-        <input type="text" id="new-exercise-name" placeholder="e.g. Dumbbell Curl">
-      </div>
+      <label>Choose exercise, or type a new one:</label>
+      <input type="text" id="exercise-search" list="exercise-datalist" placeholder="Search exercises..." value="${(prefill?.name || '').replace(/"/g,'&quot;')}" autocomplete="off">
+      <datalist id="exercise-datalist">
+        ${optionNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">`).join('')}
+      </datalist>
+      <button class="small-btn" onclick="toggleAddExerciseShowAll()">${addExerciseShowAll ? '🔽 Show only my exercises' : '🔎 Show all exercises'}</button>
+      ${!canonicalNames.length ? `<p style="color:var(--text-secondary); font-size:0.85em;">You haven't logged any exercises yet - tap "Show all exercises" to browse the built-in database, or just type a new exercise name above.</p>` : ''}
       <label>Number of sets:</label>
-      <input type="number" id="new-exercise-sets" value="1" min="1" step="1">
+      <input type="number" id="new-exercise-sets" value="${prefill?.sets || 1}" min="1" step="1">
       <button onclick="addExerciseToQuickWorkoutSmart()">Add Exercise</button>
     `;
   }
-  window.toggleNewExerciseInput = () => {
-    const select = document.getElementById('exercise-select');
-    const container = document.getElementById('new-exercise-container');
-    if (container) container.style.display = select?.value === '__new__' ? 'block' : 'none';
+  window.toggleAddExerciseShowAll = () => {
+    // Preserve whatever the user already typed/selected across the re-render.
+    const name = document.getElementById('exercise-search')?.value || '';
+    const sets = document.getElementById('new-exercise-sets')?.value || 1;
+    addExerciseShowAll = !addExerciseShowAll;
+    renderAddExercise({ name, sets });
   };
   window.addExerciseToQuickWorkoutSmart = () => {
-    const select = document.getElementById('exercise-select');
-    const newNameInput = document.getElementById('new-exercise-name');
+    const searchInput = document.getElementById('exercise-search');
     const setsInput = document.getElementById('new-exercise-sets');
-    let rawName;
-    if (select.value === '__new__') rawName = newNameInput?.value.trim();
-    else rawName = select.value;
+    const rawName = searchInput?.value.trim();
     if (!rawName) { alert('Please select or enter an exercise name.'); return; }
     const canonical = getCanonicalExerciseName(rawName);
     const finalName = canonical || rawName;
@@ -1471,10 +2052,88 @@
   window.exportHistory = () => { const blob = new Blob([JSON.stringify(data.history,null,2)], {type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `workout_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); };
   window.importHistoryPrompt = () => { const input = document.createElement('input'); input.type='file'; input.accept='.json'; input.onchange = e => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=ev=>{ try{ const imported=JSON.parse(ev.target.result); if(Array.isArray(imported)){ data.history.push(...imported.filter(x=>x.templateName && x.logs)); save(); renderHome(); alert('Imported'); } }catch(e){ alert('Invalid'); } }; reader.readAsText(file); }; input.click(); };
   
+  // ----- SYNTHETIC TEST DATA GENERATOR (v3.7.0, additive, developer-only) -----
+  // Purely ADDS realistic-looking sample workouts/bodyweight entries so
+  // charts, analytics, streaks, PRs and Relative Strength have something to
+  // show while testing. Every generated entry is flagged `synthetic: true`
+  // (an extra field the rest of the app simply ignores, same as any other
+  // additive field), so it can be identified and removed later without ever
+  // touching real logged data. Nothing existing is read, modified, or
+  // overwritten - only data.history.push(...) / data.bodyWeight.push(...).
+  const SYNTHETIC_EXERCISE_POOL = [
+    'Barbell Back Squat', 'Barbell Bench Press', 'Conventional Deadlift', 'Barbell Overhead Press',
+    'Barbell Bent Over Row', 'Lat Pulldown', 'Dumbbell Romanian Deadlift', 'Leg Press Machine',
+    'Dumbbell Shoulder Press', 'Seated Cable Row', 'Dumbbell Curl', 'Cable Tricep Pushdown',
+    // Deliberately NOT in BUILT_IN_EXERCISE_DB, to test custom-exercise handling end to end
+    // (analytics, muscle tagging fallback, and Relative Strength keyword detection):
+    'Dex Row Variation', 'High Incline Smith Press', 'Cable Rear Delt Sweep'
+  ];
+  function synthRandInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+  function synthRandStep(min, max, step) { return Math.round((min + Math.random() * (max - min)) / step) * step; }
+  function synthShuffle(arr) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+  window.generateSyntheticTestData = () => {
+    if (!confirm('Developer option: generate 8-12 weeks of realistic sample workouts and bodyweight entries for testing charts/analytics?\n\nThis only ADDS data - your real workout history and bodyweight entries are never modified, overwritten, or removed.')) return;
+    const weeks = synthRandInt(8, 12);
+    const today = new Date();
+    const startDate = new Date(today); startDate.setDate(startDate.getDate() - weeks * 7);
+    const progress = {};
+    SYNTHETIC_EXERCISE_POOL.forEach(name => { progress[name] = { weight: synthRandStep(20, 60, 2.5), reps: synthRandInt(6, 10) }; });
+    const persons = data.loveyMode ? (data.weightUsers.length ? data.weightUsers : ['Dexter', 'Cheryl']) : [data.soloUserName];
+    const currentWeight = {}; persons.forEach(p => { currentWeight[p] = synthRandStep(60, 90, 0.5); });
+    const newHistory = [], newBodyWeight = [];
+    let weekStart = new Date(startDate);
+    for (let w = 0; w < weeks; w++) {
+      const plateauWeek = Math.random() < 0.15; // occasional plateau: no weight increase this week
+      [1, 3, 5].forEach(dayOffset => { // roughly Mon/Wed/Fri
+        if (Math.random() < 0.12) return; // occasional missed session
+        const sessionDate = new Date(weekStart); sessionDate.setDate(sessionDate.getDate() + dayOffset); sessionDate.setHours(synthRandInt(7, 19), synthRandInt(0, 59), 0, 0);
+        if (sessionDate > today) return;
+        const picks = synthShuffle(SYNTHETIC_EXERCISE_POOL).slice(0, synthRandInt(3, 5));
+        const logs = picks.map(name => {
+          const p = progress[name];
+          if (!plateauWeek && Math.random() < 0.7) p.weight = Math.round((p.weight * (1 + synthRandStep(1, 4, 0.5) / 100)) * 2) / 2; // progressive overload
+          const sets = Array.from({ length: synthRandInt(3, 4) }, () => ({ weight: String(p.weight), reps: String(Math.max(1, p.reps + synthRandInt(-1, 1))) }));
+          return { name, sets };
+        });
+        newHistory.push({ date: sessionDate.toISOString(), templateName: 'Sample Workout (generated)', logs, synthetic: true });
+      });
+      persons.forEach(p => {
+        currentWeight[p] = Math.round((currentWeight[p] + (synthRandStep(-4, 3, 1) / 10)) * 10) / 10;
+        const wDate = new Date(weekStart); wDate.setDate(wDate.getDate() + synthRandInt(0, 6)); wDate.setHours(8, 0, 0, 0);
+        if (wDate <= today) newBodyWeight.push({ date: wDate.toISOString(), weight: currentWeight[p], person: p, synthetic: true });
+      });
+      weekStart.setDate(weekStart.getDate() + 7);
+    }
+    data.history.push(...newHistory);
+    data.bodyWeight.push(...newBodyWeight);
+    data.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+    data.bodyWeight.sort((a, b) => new Date(a.date) - new Date(b.date));
+    save();
+    alert(`Added ${newHistory.length} sample workouts and ${newBodyWeight.length} sample bodyweight entries.`);
+    renderHome();
+  };
+  window.clearSyntheticTestData = () => {
+    const histCount = data.history.filter(h => h.synthetic).length;
+    const bwCount = data.bodyWeight.filter(w => w.synthetic).length;
+    if (!histCount && !bwCount) { alert('No generated sample data found.'); return; }
+    if (!confirm(`Remove ${histCount} sample workout(s) and ${bwCount} sample bodyweight entr${bwCount===1?'y':'ies'}? Your real data is never affected.`)) return;
+    data.history = data.history.filter(h => !h.synthetic);
+    data.bodyWeight = data.bodyWeight.filter(w => !w.synthetic);
+    save();
+    renderHome();
+  };
+
+  // FIX: plain btoa()/atob() throw on any character outside Latin-1 (emoji,
+  // most non-English scripts), which would silently crash Share/Import for
+  // anyone with such characters in a template or exercise name. These
+  // wrappers make the share link UTF-8 safe.
+  function utf8ToB64(str) { return btoa(unescape(encodeURIComponent(str))); }
+  function b64ToUtf8(str) { return decodeURIComponent(escape(atob(str))); }
+
   let selectedShareIds = [];
   window.selectForShare = (id) => { if(selectedShareIds.includes(id)) selectedShareIds = selectedShareIds.filter(s=>s!==id); else selectedShareIds.push(id); renderHome(); };
-  window.copyShareLink = () => { const selected = data.templates.filter(t=>selectedShareIds.includes(t.id)); if(!selected.length) return; const encoded = btoa(JSON.stringify(selected.map(({id,name,rest,repRange,exercises})=>({id,name,rest,repRange,exercises})))); const url = window.location.origin + window.location.pathname + '#' + encoded; navigator.clipboard.writeText(url).then(()=>{ alert('Link copied'); selectedShareIds=[]; renderHome(); }); };
-  window.exportPrompt = () => { const code = prompt('Paste link or JSON:'); if(code) try{ let parsed; if(code.startsWith('http')) parsed=JSON.parse(atob(code.split('#')[1])); else parsed=JSON.parse(code); if(Array.isArray(parsed)){ parsed.forEach(t=>{ t.id='imported-'+Date.now()+'-'+Math.random().toString(36); data.templates.push(t); }); save(); renderHome(); alert('Imported'); } }catch(e){ alert('Invalid'); } };
+  window.copyShareLink = () => { const selected = data.templates.filter(t=>selectedShareIds.includes(t.id)); if(!selected.length) return; let encoded; try { encoded = utf8ToB64(JSON.stringify(selected.map(({id,name,rest,repRange,exercises})=>({id,name,rest,repRange,exercises})))); } catch(e) { alert('Could not create a share link for these templates.'); return; } const url = window.location.origin + window.location.pathname + '#' + encoded; navigator.clipboard.writeText(url).then(()=>{ alert('Link copied'); selectedShareIds=[]; renderHome(); }).catch(()=>{ prompt('Could not copy automatically. Here is your link:', url); }); };
+  window.exportPrompt = () => { const code = prompt('Paste link or JSON:'); if(code) try{ let parsed; if(code.startsWith('http')) parsed=JSON.parse(b64ToUtf8(code.split('#')[1])); else parsed=JSON.parse(code); if(Array.isArray(parsed)){ parsed.forEach(t=>{ t.id='imported-'+Date.now()+'-'+Math.random().toString(36); data.templates.push(t); }); save(); renderHome(); alert('Imported'); } }catch(e){ alert('Invalid'); } };
   
   // ----- PROGRESS SCREEN (v3.2.0, additive, read-only) -----
   let progressExercise = null;
@@ -1499,7 +2158,7 @@
       } else {
         const first = points[0].oneRM, last = points[points.length - 1].oneRM;
         const delta = Math.round((last - first) * 10) / 10;
-        const deltaClass = delta > 0 ? 'positive' : (delta < 0 ? 'negative' : '');
+        const deltaClass = delta > 0 ? 'trend-up' : (delta < 0 ? 'trend-down' : '');
         const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '●');
         const formulaLabel = (ONE_RM_FORMULAS[data.oneRmFormula] || ONE_RM_FORMULAS.brzycki).label;
         body = `
@@ -1527,9 +2186,15 @@
     `;
   }
 
-  // ----- WEIGHT TRACKING TAB (v3.6.0, additive) -----
+  // ----- WEIGHT TRACKING TAB (v3.6.0, additive; v3.7.0 Non-Lovey support) -----
+  // Lovey Mode: unchanged - multi-person picker/managed-user chips, exactly
+  // as before. Non-Lovey Mode: same summary cards / logging / history list
+  // and the same addWeight()/deleteWeight() functions, just scoped to the
+  // single user-defined soloUserName instead of a person picker, per spec
+  // ("Non-Lovey Mode = one user-defined person"). No behavior of Lovey Mode
+  // changes, and no existing data.bodyWeight entries are touched or hidden.
   function buildWeightTabHtml() {
-    const persons = getAllWeightPersons();
+    const persons = data.loveyMode ? getAllWeightPersons() : [data.soloUserName];
     const personStats = persons.map(p => {
       const w = data.bodyWeight.filter(w => w.person === p);
       if (!w.length) return { person: p, first: null, last: null, delta: null };
@@ -1539,20 +2204,26 @@
     });
     const esc = s => s.replace(/'/g, "\\'");
     const managedUsers = data.weightUsers.map(u => `<span class="tag-chip active" style="display:inline-flex; align-items:center; gap:5px; cursor:default;">${u} <span style="cursor:pointer;" onclick="removeWeightUser('${esc(u)}')" title="Remove">✕</span></span>`).join(' ');
+    const personControls = data.loveyMode
+      ? `<div style="margin-bottom:8px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">${managedUsers}<button class="small-btn" onclick="addWeightUser()">➕ Add person</button></div>`
+      : `<div style="margin-bottom:8px;"><span class="tag-chip active" style="display:inline-flex; align-items:center; gap:5px; cursor:default;">${data.soloUserName}</span><button class="small-btn" onclick="renameSoloUser()">✏️ Edit name</button></div>`;
+    const personSelect = data.loveyMode ? `<select id="weightPerson">${data.weightUsers.map(u => `<option value="${u.replace(/"/g,'&quot;')}">${u}</option>`).join('')}</select>` : '';
+    const visibleEntries = data.loveyMode ? data.bodyWeight : data.bodyWeight.filter(w => w.person === data.soloUserName);
+    const entryIndexOf = (entry) => data.bodyWeight.indexOf(entry);
     return `
       <h3 style="margin-top:0;">⚖️ Weight</h3>
       <div class="weight-summary-cards">${personStats.map(stat => { if (!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
       <div class="weight-logging">
         <h3>⚖️ Log Weight</h3>
-        <div style="margin-bottom:8px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">${managedUsers}<button class="small-btn" onclick="addWeightUser()">➕ Add person</button></div>
+        ${personControls}
         <div class="flex-row">
           <input type="number" id="newWeight" placeholder="Weight (kg)" step="0.1">
-          <select id="weightPerson">${data.weightUsers.map(u => `<option value="${u.replace(/"/g,'&quot;')}">${u}</option>`).join('')}</select>
+          ${personSelect}
           <input type="date" id="weightDate">
           <button class="small-btn btn-primary" onclick="addWeight()">➕ Log</button>
           <button class="small-btn" onclick="copyProgressSummary()">📤 Copy Summary</button>
         </div>
-        <div>${data.bodyWeight.map((w,idx)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${idx})">🗑️</button></div>`).join('')}</div>
+        <div>${visibleEntries.map((w)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${entryIndexOf(w)})">🗑️</button></div>`).join('')}</div>
       </div>
     `;
   }
@@ -1571,10 +2242,12 @@
     applyTheme();
     const tabs = [
       { id: 'progress', label: '📈 Progress' },
+      { id: 'strength', label: '💪 Relative Strength' },
       { id: 'weight', label: '⚖️ Weight' },
       { id: 'consistency', label: '📅 Consistency' },
       { id: 'musclesplit', label: '🎯 Muscle Split' },
-      { id: 'pr', label: '🏆 PR Hall of Fame' }
+      { id: 'pr', label: '🏆 PR Hall of Fame' },
+      { id: 'exercises', label: '🗂️ Manage Exercises' }
     ];
     const tabBar = `<div class="insights-tabbar">${tabs.map(t => `<button class="insights-tab-btn ${insightsTab===t.id?'active':''}" onclick="showInsights('${t.id}')">${t.label}</button>`).join('')}</div>`;
     let body;
@@ -1582,6 +2255,8 @@
     else if (insightsTab === 'consistency') body = buildConsistencyTabHtml();
     else if (insightsTab === 'musclesplit') body = buildMuscleSplitTabHtml();
     else if (insightsTab === 'pr') body = buildPrHallOfFameTabHtml();
+    else if (insightsTab === 'strength') body = buildRelativeStrengthTabHtml();
+    else if (insightsTab === 'exercises') body = buildExerciseManagementTabHtml();
     else body = buildProgressTabHtml();
     app.innerHTML = `
       <button onclick="renderHome()">← Back</button>
@@ -1608,6 +2283,7 @@
       <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="showInsights()">📊 Progress &amp; Stats</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
       <div id="templateList">${data.templates.map(t=>`<div class="template-item template-item-tappable" onclick="startWorkout('${t.id}')"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="event.stopPropagation(); deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="event.stopPropagation(); selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
       <h3>📜 History (${data.history.length})</h3><div class="import-export-bar"><button onclick="exportHistory()">📤 Export</button><button onclick="importHistoryPrompt()">📥 Import</button><button class="btn-danger" onclick="clearAllHistory()">🗑️ Clear All</button></div>
+      <div class="import-export-bar"><button class="small-btn" onclick="generateSyntheticTestData()">🧪 Dev: Generate Sample Data</button><button class="small-btn" onclick="clearSyntheticTestData()">🧹 Dev: Remove Sample Data</button></div>
       <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; const isEditingDate = editingDateForHistoryEntry===s; const entryDate = new Date(s.date); return `<div class="history-item"><div><b>${s.templateName}</b> ${isEditingDate ? `<span class="flex-row" style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;"><input type="date" value="${toLocalDateInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryDate(${realIdx}, this.value)"><input type="time" value="${toLocalTimeInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryTime(${realIdx}, this.value)"><button class="small-btn" onclick="toggleEditHistoryDate(${realIdx})">✔️ Done</button></span>` : `<span style="color:var(--text-secondary); cursor:pointer;" onclick="toggleEditHistoryDate(${realIdx})">${entryDate.toLocaleString()} 📅</span>`}</div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
     `;
     if (selectedShareIds.length) { let bar = document.getElementById('shareBar'); if(!bar){ bar=document.createElement('div'); bar.id='shareBar'; bar.className='sticky-share-bar'; app.appendChild(bar); } bar.innerHTML = `<span>${selectedShareIds.length} selected</span><button class="small-btn" onclick="copyShareLink()">📋 Copy link</button><button class="small-btn btn-danger" onclick="selectedShareIds=[]; renderHome();">✖ Clear</button>`; }
