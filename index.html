@@ -409,7 +409,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.9.0';
+  const APP_VERSION = '3.9.1';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -1920,16 +1920,12 @@
   // check w.isQuickWorkout anywhere. It is safe to call for a template-based workout in
   // progress OR for a saved history entry opened via editHistoryEntry(). Function names
   // were intentionally left unchanged to avoid breaking anything.
-  // v3.9.0 CHANGE: the old long <select> (every exercise you've ever used, plus
-  // the entire built-in exercise database, all in one dropdown) was hard to
-  // scan on a phone. Replaced with a text input backed by a <datalist>: typing
-  // filters suggestions live (autofill), and tapping the input still shows a
-  // native suggestion list, so it behaves like a searchable dropdown. Typing a
-  // name that isn't suggested is still accepted as a brand-new exercise -
-  // exactly as free-typing "Add new exercise..." did before, just without the
-  // extra toggle/step. By default only exercises you've actually used appear
-  // (so the list starts short and relevant); "Show all exercises" reveals the
-  // full built-in database too, for once you've exhausted your own history.
+  // v3.9.1 CHANGE: reverted the text+datalist input back to a plain <select>
+  // dropdown per feedback, but kept the "Show all exercises" toggle: the
+  // dropdown still defaults to just the exercises you've actually used
+  // (short and relevant), and only pulls in the full built-in database when
+  // you explicitly ask for it. Adding something not in the dropdown still
+  // works via the "Add new exercise..." option, same as pre-v3.9.0.
   let addExerciseShowAll = false;
   function renderAddExercise(prefill) {
     const canonicalNames = getAllUniqueCanonicalExercises();
@@ -1940,33 +1936,47 @@
     const usedNorm = new Set(canonicalNames.map(normalizeExerciseName));
     const dbOnlyNames = BUILT_IN_EXERCISE_NAMES.filter(n => !usedNorm.has(normalizeExerciseName(n)));
     const optionNames = (addExerciseShowAll ? canonicalNames.concat(dbOnlyNames) : canonicalNames).sort((a, b) => a.localeCompare(b));
+    const isNew = prefill?.selectValue === '__new__';
     const app = document.getElementById("app");
     app.innerHTML = `
       <button onclick="goToDashboard()">← Back to Workout</button>
       <h2>Add Exercise (smart search: ignores dashes/spaces/case)</h2>
-      <label>Choose exercise, or type a new one:</label>
-      <input type="text" id="exercise-search" list="exercise-datalist" placeholder="Search exercises..." value="${(prefill?.name || '').replace(/"/g,'&quot;')}" autocomplete="off">
-      <datalist id="exercise-datalist">
-        ${optionNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">`).join('')}
-      </datalist>
+      <label>Choose exercise:</label>
+      <select id="exercise-select" onchange="toggleNewExerciseInput()">
+        <option value="">-- Select --</option>
+        ${optionNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}" ${prefill?.selectValue===name?'selected':''}>${name}</option>`).join('')}
+        <option value="__new__" ${isNew?'selected':''}>➕ Add new exercise...</option>
+      </select>
       <button class="small-btn" onclick="toggleAddExerciseShowAll()">${addExerciseShowAll ? '🔽 Show only my exercises' : '🔎 Show all exercises'}</button>
-      ${!canonicalNames.length ? `<p style="color:var(--text-secondary); font-size:0.85em;">You haven't logged any exercises yet - tap "Show all exercises" to browse the built-in database, or just type a new exercise name above.</p>` : ''}
+      <div id="new-exercise-container" style="display: ${isNew ? 'block' : 'none'}; margin-top: 10px;">
+        <label>New exercise name (will be normalized to avoid duplicates):</label>
+        <input type="text" id="new-exercise-name" placeholder="e.g. Dumbbell Curl" value="${(prefill?.newName || '').replace(/"/g,'&quot;')}">
+      </div>
       <label>Number of sets:</label>
       <input type="number" id="new-exercise-sets" value="${prefill?.sets || 1}" min="1" step="1">
       <button onclick="addExerciseToQuickWorkoutSmart()">Add Exercise</button>
     `;
   }
+  window.toggleNewExerciseInput = () => {
+    const select = document.getElementById('exercise-select');
+    const container = document.getElementById('new-exercise-container');
+    if (container) container.style.display = select?.value === '__new__' ? 'block' : 'none';
+  };
   window.toggleAddExerciseShowAll = () => {
-    // Preserve whatever the user already typed/selected across the re-render.
-    const name = document.getElementById('exercise-search')?.value || '';
+    // Preserve whatever the user already selected/typed across the re-render.
+    const select = document.getElementById('exercise-select');
+    const newName = document.getElementById('new-exercise-name')?.value || '';
     const sets = document.getElementById('new-exercise-sets')?.value || 1;
     addExerciseShowAll = !addExerciseShowAll;
-    renderAddExercise({ name, sets });
+    renderAddExercise({ selectValue: select?.value, newName, sets });
   };
   window.addExerciseToQuickWorkoutSmart = () => {
-    const searchInput = document.getElementById('exercise-search');
+    const select = document.getElementById('exercise-select');
+    const newNameInput = document.getElementById('new-exercise-name');
     const setsInput = document.getElementById('new-exercise-sets');
-    const rawName = searchInput?.value.trim();
+    let rawName;
+    if (select.value === '__new__') rawName = newNameInput?.value.trim();
+    else rawName = select.value;
     if (!rawName) { alert('Please select or enter an exercise name.'); return; }
     const canonical = getCanonicalExerciseName(rawName);
     const finalName = canonical || rawName;
