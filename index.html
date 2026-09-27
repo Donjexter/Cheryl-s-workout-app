@@ -263,6 +263,10 @@
   .tag-chip.active { background: var(--accent); color: white; border-color: var(--accent); }
   .progress-bar-track { background: var(--surface-light); border-radius: 8px; height: 10px; overflow: hidden; margin: 6px 0 14px; }
   .progress-bar-fill { background: var(--accent); height: 100%; transition: width 0.2s; }
+  /* ----- Insights tab hub (additive) ----- */
+  .insights-tabbar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
+  .insights-tab-btn { width: auto; white-space: nowrap; padding: 8px 12px; margin: 0; background: var(--surface-light); border: 1px solid var(--border); flex-shrink: 0; }
+  .insights-tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
   .history-actions {
     display: flex;
     gap: 8px;
@@ -448,7 +452,7 @@
   let data;
 
   if (!stored) {
-    data = { templates: [...DEFAULT_TEMPLATES], activeWorkout: null, history: [], bodyWeight: [], theme: 'cute', loveyMode: true, version: APP_VERSION, exerciseTags: {}, oneRmFormula: 'brzycki' };
+    data = { templates: [...DEFAULT_TEMPLATES], activeWorkout: null, history: [], bodyWeight: [], theme: 'cute', loveyMode: true, version: APP_VERSION, exerciseTags: {}, oneRmFormula: 'brzycki', weightUsers: ['Dexter', 'Cheryl'] };
   } else {
     let mergedTemplates = stored.templates || [];
     DEFAULT_TEMPLATES.forEach(def => { if (!mergedTemplates.some(t => t.id === def.id)) mergedTemplates.push(def); });
@@ -468,7 +472,11 @@
     // oneRmFormula (v3.4.0, additive): which 1RM estimate formula the Progress
     // screen uses. Defaults to 'brzycki', the formula already in use, so the
     // Progress chart looks identical to before until someone changes it.
-    data = { templates: mergedTemplates, activeWorkout: stored.activeWorkout || null, history: stored.history || [], bodyWeight: stored.bodyWeight || [], theme: migratedTheme || 'cute', loveyMode: migratedLovey === undefined ? true : migratedLovey, version: APP_VERSION, exerciseTags: stored.exerciseTags || {}, oneRmFormula: stored.oneRmFormula || 'brzycki' };
+    // weightUsers (v3.6.0, additive): the list of people offered in the
+    // weight-logging dropdown. Defaults to the two names this app always
+    // hardcoded, so every existing data.bodyWeight entry (person: 'Dexter'
+    // or 'Cheryl') still matches a listed name with no data changes.
+    data = { templates: mergedTemplates, activeWorkout: stored.activeWorkout || null, history: stored.history || [], bodyWeight: stored.bodyWeight || [], theme: migratedTheme || 'cute', loveyMode: migratedLovey === undefined ? true : migratedLovey, version: APP_VERSION, exerciseTags: stored.exerciseTags || {}, oneRmFormula: stored.oneRmFormula || 'brzycki', weightUsers: stored.weightUsers || ['Dexter', 'Cheryl'] };
   }
   data.templates = data.templates.map(t => ({ id: t.id || 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2,8), ...t }));
   data.bodyWeight = data.bodyWeight.map(w => ({ ...w, person: w.person || 'Dexter' }));
@@ -547,17 +555,34 @@
   const ONE_RM_FORMULAS = {
     brzycki:  { label: 'Brzycki',  calc: (w, r) => { const denom = 1.0278 - 0.0278 * r; return denom > 0 ? w / denom : null; } },
     epley:    { label: 'Epley',    calc: (w, r) => w * (1 + r / 30) },
-    lombardi: { label: 'Lombardi', calc: (w, r) => w * Math.pow(r, 0.10) }
+    lombardi: { label: 'Lombardi', calc: (w, r) => w * Math.pow(r, 0.10) },
+    // 'auto' has no calc of its own - estimateOneRM() intercepts it below and
+    // picks whichever real formula best fits that particular set's rep
+    // range, so this entry only exists to give it a label in the dropdown.
+    auto:     { label: 'Auto (by rep range)', calc: (w, r) => { const denom = 1.0278 - 0.0278 * r; return denom > 0 ? w / denom : null; } }
   };
+  // Heuristic used by the 'auto' formula: each published formula was fit to
+  // a different rep range, so instead of picking one curve for every set,
+  // 'auto' applies whichever curve tends to track actual 1RM best for that
+  // set's own rep count - Epley for very low reps (near-maximal singles/
+  // doubles/triples, where its simple linear model holds up well), Brzycki
+  // for the classic mid-range it was validated on, and Lombardi (a gentler
+  // power curve) for higher reps where Brzycki's denominator gets unstable.
+  function pickFormulaForReps(reps) {
+    if (reps <= 5) return 'epley';
+    if (reps <= 10) return 'brzycki';
+    return 'lombardi';
+  }
   function estimateOneRM(weight, reps, formula) {
     if (!weight || !reps || reps < 1 || reps > 12) return null;
-    const f = ONE_RM_FORMULAS[formula] || ONE_RM_FORMULAS.brzycki;
+    const resolved = formula === 'auto' ? pickFormulaForReps(reps) : formula;
+    const f = ONE_RM_FORMULAS[resolved] || ONE_RM_FORMULAS.brzycki;
     const val = f.calc(weight, reps);
     return (val === null || isNaN(val)) ? null : val;
   }
   // Kept for compatibility with anything referencing the original name.
   function brzyckiOneRM(weight, reps) { return estimateOneRM(weight, reps, 'brzycki'); }
-  window.setOneRmFormula = (formula) => { if (ONE_RM_FORMULAS[formula]) { data.oneRmFormula = formula; save(); renderProgress(); } };
+  window.setOneRmFormula = (formula) => { if (ONE_RM_FORMULAS[formula]) { data.oneRmFormula = formula; save(); renderInsights(); } };
   // Returns [{date, oneRM}] sorted oldest->newest: the best (highest) estimated
   // 1RM among that session's valid sets for the given exercise name, using
   // the given formula (defaults to the user's saved preference).
@@ -633,14 +658,14 @@
     if (Object.prototype.hasOwnProperty.call(data.exerciseTags, canonicalName)) return data.exerciseTags[canonicalName];
     return getDefaultTagsFor(canonicalName);
   }
-  window.setExerciseTags = (canonicalName, tags) => { data.exerciseTags[canonicalName] = tags; save(); renderMuscleSplit(); };
+  window.setExerciseTags = (canonicalName, tags) => { data.exerciseTags[canonicalName] = tags; save(); renderInsights(); };
   window.toggleExerciseTag = (canonicalName, tag) => {
     const current = getExerciseTags(canonicalName).slice();
     const idx = current.indexOf(tag);
     if (idx === -1) current.push(tag); else current.splice(idx, 1);
     setExerciseTags(canonicalName, current);
   };
-  window.toggleEditTagsFor = (canonicalName) => { editingTagsFor = editingTagsFor === canonicalName ? null : canonicalName; renderMuscleSplit(); };
+  window.toggleEditTagsFor = (canonicalName) => { editingTagsFor = editingTagsFor === canonicalName ? null : canonicalName; renderInsights(); };
 
   // Sums completed sets per muscle group across history (optionally limited
   // to the last N days), crediting every tag an exercise has in full (a
@@ -683,11 +708,9 @@
   }
   let muscleSplitPeriod = 'all';
   let editingTagsFor = null;
-  window.showMuscleSplit = () => { editingTagsFor = null; renderMuscleSplit(); };
-  window.setMuscleSplitPeriod = (p) => { muscleSplitPeriod = p; renderMuscleSplit(); };
-  function renderMuscleSplit() {
-    const app = document.getElementById('app');
-    applyTheme();
+  window.showMuscleSplit = () => { editingTagsFor = null; showInsights('musclesplit'); };
+  window.setMuscleSplitPeriod = (p) => { muscleSplitPeriod = p; renderInsights(); };
+  function buildMuscleSplitTabHtml() {
     const periodDays = muscleSplitPeriod === '30' ? 30 : muscleSplitPeriod === '90' ? 90 : null;
     const totals = getMuscleSplitTotals(periodDays);
     const hasData = Object.values(totals).some(v => v > 0);
@@ -710,9 +733,8 @@
         </div>
       `;
     }
-    app.innerHTML = `
-      <button onclick="renderHome()">← Back</button>
-      <h2>🎯 Muscle Group Split</h2>
+    return `
+      <h3 style="margin-top:0;">🎯 Muscle Group Split</h3>
       <div class="flex-row">
         <button class="small-btn ${muscleSplitPeriod === 'all' ? 'btn-primary' : ''}" onclick="setMuscleSplitPeriod('all')">All Time</button>
         <button class="small-btn ${muscleSplitPeriod === '90' ? 'btn-primary' : ''}" onclick="setMuscleSplitPeriod('90')">Last 90d</button>
@@ -727,7 +749,6 @@
       ${tagged.length ? `<h4>Tagged (${tagged.length})</h4>${tagged.map(renderTagRow).join('')}` : ''}
     `;
   }
-  window.renderMuscleSplit = renderMuscleSplit;
 
   // ----- CONSISTENCY: STREAKS + HEATMAP (v3.4.0, additive, read-only) -----
   // Reads data.history only (grouped by calendar day of session date).
@@ -794,16 +815,13 @@
     return `<div style="display:flex; gap:4px;">${dayLabelsCol}<div class="heatmap-scroll"><div class="heatmap-grid">${cols}</div></div></div>
       <div class="heatmap-legend"><span>Less</span><div class="heatmap-cell"></div><div class="heatmap-cell heat-1"></div><div class="heatmap-cell heat-2"></div><div class="heatmap-cell heat-3"></div><span>More</span></div>`;
   }
-  window.showConsistency = () => renderConsistency();
-  function renderConsistency() {
-    const app = document.getElementById('app');
-    applyTheme();
+  window.showConsistency = () => showInsights('consistency');
+  function buildConsistencyTabHtml() {
     const counts = getSessionCountsByDay();
     const { current, longest } = computeStreaks(counts);
     const totalSessions = data.history.length;
-    app.innerHTML = `
-      <button onclick="renderHome()">← Back</button>
-      <h2>📅 Consistency</h2>
+    return `
+      <h3 style="margin-top:0;">📅 Consistency</h3>
       <div class="streak-cards">
         <div class="person-card"><div class="streak-number">${current}</div>Current streak (days)</div>
         <div class="person-card"><div class="streak-number">${longest}</div>Longest streak (days)</div>
@@ -812,7 +830,62 @@
       ${totalSessions ? buildHeatmapHtml(counts) : '<p>No workouts logged yet - your heatmap will fill in as you train.</p>'}
     `;
   }
-  window.renderConsistency = renderConsistency;
+
+  // ----- PR HALL OF FAME (v3.5.0, additive, read-only) -----
+  // Scans data.history for each canonical exercise name and surfaces its
+  // all-time bests: heaviest single set, best estimated 1RM (using the
+  // current formula preference), and best single-session volume. Purely
+  // computed from existing logs - no new fields are written anywhere.
+  function getExercisePRs(exerciseName) {
+    const formula = data.oneRmFormula || 'brzycki';
+    let maxWeight = null, maxWeightDate = null;
+    let bestOneRM = null, bestOneRMDate = null;
+    let bestVolume = null, bestVolumeDate = null;
+    data.history.forEach(entry => {
+      const exLog = entry.logs.find(l => l.name === exerciseName);
+      if (!exLog) return;
+      let sessionVolume = 0;
+      exLog.sets.forEach(s => {
+        const weight = parseFloat(s.weight);
+        const reps = parseInt(s.reps);
+        if (!isNaN(weight) && !isNaN(reps) && reps > 0) {
+          sessionVolume += weight * reps;
+          if (maxWeight === null || weight > maxWeight) { maxWeight = weight; maxWeightDate = entry.date; }
+          const est = estimateOneRM(weight, reps, formula);
+          if (est !== null && (bestOneRM === null || est > bestOneRM)) { bestOneRM = est; bestOneRMDate = entry.date; }
+        }
+      });
+      if (sessionVolume > 0 && (bestVolume === null || sessionVolume > bestVolume)) { bestVolume = sessionVolume; bestVolumeDate = entry.date; }
+    });
+    if (maxWeight === null && bestOneRM === null && bestVolume === null) return null;
+    return {
+      maxWeight, maxWeightDate,
+      bestOneRM: bestOneRM !== null ? Math.round(bestOneRM * 10) / 10 : null, bestOneRMDate,
+      bestVolume, bestVolumeDate
+    };
+  }
+  window.showPrHallOfFame = () => showInsights('pr');
+  function buildPrHallOfFameTabHtml() {
+    const formulaLabel = (ONE_RM_FORMULAS[data.oneRmFormula] || ONE_RM_FORMULAS.brzycki).label;
+    const exercises = getAllUniqueCanonicalExercises();
+    const withPRs = exercises.map(name => ({ name, prs: getExercisePRs(name) })).filter(e => e.prs);
+    withPRs.sort((a, b) => a.name.localeCompare(b.name));
+    const cards = withPRs.map(({ name, prs }) => `
+      <div class="exercise-card">
+        <b>🏆 ${name}</b>
+        <div style="color:var(--text-secondary); font-size:0.9em; margin-top:4px;">
+          ${prs.maxWeight !== null ? `Heaviest weight: <b>${prs.maxWeight}kg</b> (${new Date(prs.maxWeightDate).toLocaleDateString()})<br>` : ''}
+          ${prs.bestOneRM !== null ? `Best est. 1RM (${formulaLabel}): <b>${prs.bestOneRM}kg</b> (${new Date(prs.bestOneRMDate).toLocaleDateString()})<br>` : ''}
+          ${prs.bestVolume !== null ? `Best session volume: <b>${Math.round(prs.bestVolume)}kg</b> (${new Date(prs.bestVolumeDate).toLocaleDateString()})` : ''}
+        </div>
+      </div>
+    `).join('');
+    return `
+      <h3 style="margin-top:0;">🏆 PR Hall of Fame</h3>
+      ${withPRs.length ? cards : '<p>No logged sets yet - your personal records will show up here once you finish a workout.</p>'}
+    `;
+  }
+
   function buildOneRmChartSvg(points) {
     const w = 560, h = 220, padL = 45, padR = 15, padT = 15, padB = 30;
     const values = points.map(p => p.oneRM);
@@ -903,17 +976,42 @@
 
 
   // Weight & history helpers (unchanged)
+  // ----- CUSTOM WEIGHT-TRACKING USERS (v3.6.0, additive) -----
+  // data.weightUsers is just the list offered in the logging dropdown/summary
+  // cards. Removing a name here never deletes their already-logged entries -
+  // getAllWeightPersons() below always includes anyone with existing
+  // data.bodyWeight rows, even if they've since been removed from the list,
+  // so no logged weight is ever hidden or lost.
+  function getAllWeightPersons() {
+    const set = new Set(data.weightUsers);
+    data.bodyWeight.forEach(w => set.add(w.person));
+    return Array.from(set);
+  }
+  window.addWeightUser = () => {
+    const name = prompt('Name to add for weight tracking:');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    if (!data.weightUsers.includes(trimmed)) data.weightUsers.push(trimmed);
+    save();
+    renderInsights();
+  };
+  window.removeWeightUser = (name) => {
+    if (!confirm(`Remove "${name}" from the weight-tracking list? Their already-logged entries are kept.`)) return;
+    data.weightUsers = data.weightUsers.filter(u => u !== name);
+    save();
+    renderInsights();
+  };
   window.addWeight = () => {
     const weight = parseFloat(document.getElementById('newWeight')?.value);
     if (isNaN(weight) || weight <= 0) return alert('Valid weight');
-    const person = document.getElementById('weightPerson')?.value || 'Dexter';
+    const person = document.getElementById('weightPerson')?.value || (data.weightUsers[0] || 'Me');
     let date = document.getElementById('weightDate')?.value ? new Date(document.getElementById('weightDate').value + 'T12:00:00') : new Date();
     data.bodyWeight.push({ date: date.toISOString(), weight, person });
     data.bodyWeight.sort((a,b) => new Date(a.date) - new Date(b.date));
     save();
-    renderHome();
+    renderInsights();
   };
-  window.deleteWeight = (idx) => { if (confirm('Delete entry?')) { data.bodyWeight.splice(idx,1); save(); renderHome(); } };
+  window.deleteWeight = (idx) => { if (confirm('Delete entry?')) { data.bodyWeight.splice(idx,1); save(); renderInsights(); } };
   window.copyProgressSummary = () => { /* same as before, kept for brevity, not modified */ alert("Summary copied (legacy)"); };
   window.createTemplate = () => {
     const name = prompt("Template Name:");
@@ -990,6 +1088,7 @@
         was touched; nothing here overwrites existing sets/logs/history.
       -->
       <button onclick="showAddExercise()">+ Add Exercise</button>
+      ${(w.isQuickWorkout && w.logs.length === 0) ? `<button onclick="generateRandomWorkout()">🎲 Generate Workout</button>` : ''}
     `;
     resumeTimerIfNeeded();
   }
@@ -1028,6 +1127,86 @@
       return { weight: source?.weight || "", reps: source?.reps || "" };
     });
   }
+
+  // ----- RANDOM STRUCTURED WORKOUT GENERATOR (v3.6.0, additive) -----
+  // Only ever runs against an empty Quick Workout (data.activeWorkout.logs
+  // starts at []), and only ADDS entries to it the same way manually adding
+  // exercises does - it never touches templates or history.
+  //
+  // How it picks exercises:
+  //   1. Candidate pool = exercises you've actually logged before (so every
+  //      suggestion already has real weight/rep history to autofill from).
+  //   2. "Structured" balance: candidates are bucketed by muscle-group tag
+  //      (reusing the tags from the Muscle Split tab), then one exercise is
+  //      picked per muscle group instead of N fully random picks - so you
+  //      don't end up with, say, four push exercises by chance.
+  //   3. Recovery-aware ordering: muscle groups are tackled in order of how
+  //      long it's been since you last trained them (longest-overdue first),
+  //      so the groups you're most "due" for are the ones most likely to make
+  //      the cut when only a few slots are available.
+  //   4. Fallback: untagged exercises, or extra slots after every group has
+  //      contributed one pick, are filled randomly from the remaining pool.
+  //   5. Each picked exercise gets its sets/reps pre-filled exactly like a
+  //      manually-added one (buildAutofilledSets), and its set COUNT mirrors
+  //      how many sets you actually did last time (getTypicalSetCount).
+  function getTypicalSetCount(exerciseName) {
+    const lastSets = getLastUsedSets(exerciseName);
+    return (lastSets && lastSets.length) ? lastSets.length : 3;
+  }
+  function daysSinceGroupLastTrained(group) {
+    let mostRecent = null;
+    data.history.forEach(entry => {
+      entry.logs.forEach(l => {
+        const canonical = getCanonicalExerciseName(l.name) || l.name;
+        if (getExerciseTags(canonical).includes(group)) {
+          const d = new Date(entry.date);
+          if (!mostRecent || d > mostRecent) mostRecent = d;
+        }
+      });
+    });
+    if (!mostRecent) return Infinity;
+    return Math.round((Date.now() - mostRecent.getTime()) / 86400000);
+  }
+  function pickBalancedRandomExercises(n) {
+    const loggedExercises = getAllUniqueCanonicalExercises().filter(name => getLastUsedSets(name));
+    if (!loggedExercises.length) return [];
+    const buckets = {};
+    MUSCLE_GROUPS.forEach(g => buckets[g] = []);
+    loggedExercises.forEach(name => {
+      const canonical = getCanonicalExerciseName(name) || name;
+      getExerciseTags(canonical).forEach(g => { if (buckets[g]) buckets[g].push(name); });
+    });
+    const orderedGroups = MUSCLE_GROUPS
+      .filter(g => buckets[g].length)
+      .map(g => ({ g, days: daysSinceGroupLastTrained(g) }))
+      .sort((a, b) => b.days - a.days)
+      .map(x => x.g);
+    const picks = [];
+    const usedNames = new Set();
+    for (const group of orderedGroups) {
+      if (picks.length >= n) break;
+      const candidates = buckets[group].filter(name => !usedNames.has(name));
+      if (!candidates.length) continue;
+      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      picks.push(chosen);
+      usedNames.add(chosen);
+    }
+    const remainingPool = loggedExercises.filter(name => !usedNames.has(name));
+    while (picks.length < n && remainingPool.length) {
+      const i = Math.floor(Math.random() * remainingPool.length);
+      picks.push(remainingPool.splice(i, 1)[0]);
+    }
+    return picks;
+  }
+  window.generateRandomWorkout = () => {
+    const w = data.activeWorkout;
+    if (!w || !w.isQuickWorkout) return;
+    const picks = pickBalancedRandomExercises(5);
+    if (!picks.length) { alert('Not enough logged exercise history yet to generate a workout - finish a couple of regular workouts first!'); return; }
+    w.logs = picks.map(name => ({ name, sets: buildAutofilledSets(name, getTypicalSetCount(name)) }));
+    save();
+    renderWorkout();
+  };
 
   // ----- PROGRESSIVE OVERLOAD SUGGESTION (v3.2.0, additive, read-only) -----
   // Reads data.history only - never writes anything. Looks at the most recent
@@ -1304,12 +1483,10 @@
       const names = getAllUniqueCanonicalExercises();
       progressExercise = names[0] || null;
     }
-    renderProgress();
+    showInsights('progress');
   };
-  window.selectProgressExercise = (name) => { progressExercise = name; renderProgress(); };
-  function renderProgress() {
-    const app = document.getElementById("app");
-    applyTheme();
+  window.selectProgressExercise = (name) => { progressExercise = name; renderInsights(); };
+  function buildProgressTabHtml() {
     const names = getAllUniqueCanonicalExercises();
     let body;
     if (!names.length) {
@@ -1335,9 +1512,8 @@
         `;
       }
     }
-    app.innerHTML = `
-      <button onclick="renderHome()">← Back</button>
-      <h2>📈 Progress</h2>
+    return `
+      <h3 style="margin-top:0;">📈 Progress</h3>
       ${names.length ? `<label>Exercise:</label>
       <select onchange="selectProgressExercise(this.value)">
         ${names.map(n => `<option value="${n.replace(/"/g,'&quot;')}" ${n===progressExercise?'selected':''}>${n}</option>`).join('')}
@@ -1345,10 +1521,76 @@
       <label>1RM formula:</label>
       <select onchange="setOneRmFormula(this.value)">
         ${Object.keys(ONE_RM_FORMULAS).map(k => `<option value="${k}" ${data.oneRmFormula===k?'selected':''}>${ONE_RM_FORMULAS[k].label}</option>`).join('')}
-      </select>` : ''}
+      </select>
+      ${data.oneRmFormula === 'auto' ? `<p style="color:var(--text-secondary); font-size:0.85em; margin-top:2px;">Auto picks the formula that best fits each set's rep range: Epley for 1–5 reps, Brzycki for 6–10, Lombardi for 11–12.</p>` : ''}` : ''}
       ${body}
     `;
   }
+
+  // ----- WEIGHT TRACKING TAB (v3.6.0, additive) -----
+  function buildWeightTabHtml() {
+    const persons = getAllWeightPersons();
+    const personStats = persons.map(p => {
+      const w = data.bodyWeight.filter(w => w.person === p);
+      if (!w.length) return { person: p, first: null, last: null, delta: null };
+      const first = w[0], last = w[w.length - 1];
+      const delta = (last.weight - first.weight).toFixed(1);
+      return { person: p, first, last, delta };
+    });
+    const esc = s => s.replace(/'/g, "\\'");
+    const managedUsers = data.weightUsers.map(u => `<span class="tag-chip active" style="display:inline-flex; align-items:center; gap:5px; cursor:default;">${u} <span style="cursor:pointer;" onclick="removeWeightUser('${esc(u)}')" title="Remove">✕</span></span>`).join(' ');
+    return `
+      <h3 style="margin-top:0;">⚖️ Weight</h3>
+      <div class="weight-summary-cards">${personStats.map(stat => { if (!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
+      <div class="weight-logging">
+        <h3>⚖️ Log Weight</h3>
+        <div style="margin-bottom:8px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">${managedUsers}<button class="small-btn" onclick="addWeightUser()">➕ Add person</button></div>
+        <div class="flex-row">
+          <input type="number" id="newWeight" placeholder="Weight (kg)" step="0.1">
+          <select id="weightPerson">${data.weightUsers.map(u => `<option value="${u.replace(/"/g,'&quot;')}">${u}</option>`).join('')}</select>
+          <input type="date" id="weightDate">
+          <button class="small-btn btn-primary" onclick="addWeight()">➕ Log</button>
+          <button class="small-btn" onclick="copyProgressSummary()">📤 Copy Summary</button>
+        </div>
+        <div>${data.bodyWeight.map((w,idx)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${idx})">🗑️</button></div>`).join('')}</div>
+      </div>
+    `;
+  }
+
+  // ----- UNIFIED PROGRESS & STATS TAB HUB (v3.6.0, additive) -----
+  // Consolidates Progress / Weight / Consistency / Muscle Split / PR Hall of
+  // Fame under one screen with a tab bar, instead of five separate Home
+  // buttons/screens. Each tab's own state (selected exercise, formula,
+  // muscle-split period, tag-editing row, etc.) is unchanged - this only
+  // changes how the resulting markup is delivered to the page (one shared
+  // shell instead of each tab owning the whole screen).
+  let insightsTab = 'progress';
+  window.showInsights = (tab) => { if (tab) insightsTab = tab; renderInsights(); };
+  function renderInsights() {
+    const app = document.getElementById('app');
+    applyTheme();
+    const tabs = [
+      { id: 'progress', label: '📈 Progress' },
+      { id: 'weight', label: '⚖️ Weight' },
+      { id: 'consistency', label: '📅 Consistency' },
+      { id: 'musclesplit', label: '🎯 Muscle Split' },
+      { id: 'pr', label: '🏆 PR Hall of Fame' }
+    ];
+    const tabBar = `<div class="insights-tabbar">${tabs.map(t => `<button class="insights-tab-btn ${insightsTab===t.id?'active':''}" onclick="showInsights('${t.id}')">${t.label}</button>`).join('')}</div>`;
+    let body;
+    if (insightsTab === 'weight') body = buildWeightTabHtml();
+    else if (insightsTab === 'consistency') body = buildConsistencyTabHtml();
+    else if (insightsTab === 'musclesplit') body = buildMuscleSplitTabHtml();
+    else if (insightsTab === 'pr') body = buildPrHallOfFameTabHtml();
+    else body = buildProgressTabHtml();
+    app.innerHTML = `
+      <button onclick="renderHome()">← Back</button>
+      <h2>📊 Progress &amp; Stats</h2>
+      ${tabBar}
+      ${body}
+    `;
+  }
+  window.renderInsights = renderInsights;
 
   function renderHome() {
     const app = document.getElementById("app");
@@ -1356,19 +1598,15 @@
     const now = new Date(), target = new Date(now.getFullYear(),8,29); if(now>target) target.setFullYear(target.getFullYear()+1);
     const diffDays = Math.floor((target-now)/(1000*60*60*24)), diffHours = Math.floor(((target-now)%(1000*60*60*24))/(1000*60*60));
     const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until 29th September ❤️`;
-    const persons = ['Dexter','Cheryl'];
-    const personStats = persons.map(p=>{ const w=data.bodyWeight.filter(w=>w.person===p); if(!w.length) return {person:p,first:null,last:null,delta:null}; const first=w[0],last=w[w.length-1]; const delta=(last.weight-first.weight).toFixed(1); return {person:p,first,last,delta}; });
     app.innerHTML = `
       <div class="theme-picker">
         <div class="theme-swatches">${THEMES.map(t => `<button class="swatch-btn ${data.theme===t.id?'active':''}" style="--swatch:${t.swatch}" title="${t.label}" onclick="setTheme('${t.id}')"></button>`).join('')}</div>
         <button class="small-btn lovey-toggle-btn" onclick="toggleLoveyMode()">${data.loveyMode ? '🙅 Hide lovey extras' : '🌸 Show lovey extras'}</button>
       </div>
       <div class="countdown">${countdownText}</div>
-      <div class="weight-summary-cards">${personStats.map(stat=>{ if(!stat.first) return `<div class="person-card"><b>${stat.person}</b><br>No entries</div>`; const deltaClass = stat.delta>0?'positive':(stat.delta<0?'negative':''); const arrow = stat.delta>0?'▲':(stat.delta<0?'▼':'●'); return `<div class="person-card"><b>${stat.person}</b><br>Start: ${stat.first.weight}kg (${new Date(stat.first.date).toLocaleDateString()})<br>Now: ${stat.last.weight}kg (${new Date(stat.last.date).toLocaleDateString()})<br><span class="delta ${deltaClass}">${arrow} ${Math.abs(stat.delta)} kg</span></div>`; }).join('')}</div>
       <div style="display:flex; justify-content:space-between;"><h2>🏋️ Workouts</h2><span class="version-badge">v${APP_VERSION}</span></div>
-      <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="showProgress()">📈 Progress</button><button onclick="showConsistency()">📅 Consistency</button><button onclick="showMuscleSplit()">🎯 Muscle Split</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
+      <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="showInsights()">📊 Progress &amp; Stats</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
       <div id="templateList">${data.templates.map(t=>`<div class="template-item template-item-tappable" onclick="startWorkout('${t.id}')"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="event.stopPropagation(); deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="event.stopPropagation(); selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
-      <div class="weight-logging"><h3>⚖️ Log Weight</h3><div class="flex-row"><input type="number" id="newWeight" placeholder="Weight (kg)" step="0.1"><select id="weightPerson"><option value="Dexter">Dexter</option><option value="Cheryl">Cheryl</option></select><input type="date" id="weightDate"><button class="small-btn btn-primary" onclick="addWeight()">➕ Log</button><button class="small-btn" onclick="copyProgressSummary()">📤 Copy Summary</button></div><div>${data.bodyWeight.map((w,idx)=>`<div class="weight-item flex-row"><span>${new Date(w.date).toLocaleDateString()} – <b>${w.person}</b>: ${w.weight} kg</span><button class="small-btn btn-danger" onclick="deleteWeight(${idx})">🗑️</button></div>`).join('')}</div></div>
       <h3>📜 History (${data.history.length})</h3><div class="import-export-bar"><button onclick="exportHistory()">📤 Export</button><button onclick="importHistoryPrompt()">📥 Import</button><button class="btn-danger" onclick="clearAllHistory()">🗑️ Clear All</button></div>
       <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; const isEditingDate = editingDateForHistoryEntry===s; const entryDate = new Date(s.date); return `<div class="history-item"><div><b>${s.templateName}</b> ${isEditingDate ? `<span class="flex-row" style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;"><input type="date" value="${toLocalDateInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryDate(${realIdx}, this.value)"><input type="time" value="${toLocalTimeInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryTime(${realIdx}, this.value)"><button class="small-btn" onclick="toggleEditHistoryDate(${realIdx})">✔️ Done</button></span>` : `<span style="color:var(--text-secondary); cursor:pointer;" onclick="toggleEditHistoryDate(${realIdx})">${entryDate.toLocaleString()} 📅</span>`}</div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
     `;
