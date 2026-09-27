@@ -409,7 +409,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.9.1';
+  const APP_VERSION = '3.10.1';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -927,6 +927,84 @@
   };
   window.toggleEditTagsFor = (canonicalName) => { editingTagsFor = editingTagsFor === canonicalName ? null : canonicalName; renderInsights(); };
 
+  // ----- AUTO-TAG UNTAGGED EXERCISES BY KEYWORD (additive) -----
+  // Guesses muscle-group tags for exercises that have no tags at all, by
+  // matching keywords against the normalized (lowercase, no spaces/dashes)
+  // exercise name. Ordered most-specific-first so e.g. "leg press" matches
+  // before the generic "press" fallback. Only ever used to fill in exercises
+  // with zero tags - anything already tagged (built-in or user-edited,
+  // including a deliberately emptied-out tag list) is left completely alone.
+  const AUTO_TAG_KEYWORDS = [
+    // Legs
+    { keys: ['squat'], tags: ['Quads', 'Glutes'] },
+    { keys: ['legpress'], tags: ['Quads', 'Glutes'] },
+    { keys: ['legextension'], tags: ['Quads'] },
+    { keys: ['legcurl', 'hamstringcurl'], tags: ['Hamstrings'] },
+    { keys: ['lunge'], tags: ['Quads', 'Glutes'] },
+    { keys: ['stepup'], tags: ['Quads', 'Glutes'] },
+    { keys: ['deadlift'], tags: ['Hamstrings', 'Back', 'Glutes'] },
+    { keys: ['hipthrust', 'glutebridge'], tags: ['Glutes', 'Hamstrings'] },
+    { keys: ['calfraise', 'calf'], tags: ['Calves'] },
+    { keys: ['adduction', 'abduction'], tags: ['Glutes'] },
+    // Chest
+    { keys: ['benchpress', 'bench'], tags: ['Chest', 'Triceps', 'Shoulders'] },
+    { keys: ['chestpress', 'chestfly', 'pecdeck', 'crossover', 'flye', 'fly'], tags: ['Chest'] },
+    { keys: ['pushup'], tags: ['Chest', 'Triceps', 'Shoulders'] },
+    { keys: ['dip'], tags: ['Triceps', 'Chest'] },
+    // Back
+    { keys: ['pulldown'], tags: ['Back', 'Biceps'] },
+    { keys: ['pullup', 'chinup'], tags: ['Back', 'Biceps'] },
+    { keys: ['facepull'], tags: ['Shoulders', 'Back'] },
+    { keys: ['reardelt'], tags: ['Shoulders', 'Back'] },
+    { keys: ['uprightrow'], tags: ['Shoulders', 'Back'] },
+    { keys: ['shrug'], tags: ['Back'] },
+    { keys: ['row'], tags: ['Back', 'Biceps'] },
+    // Shoulders
+    { keys: ['overheadpress', 'militarypress', 'shoulderpress'], tags: ['Shoulders', 'Triceps'] },
+    { keys: ['lateralraise'], tags: ['Shoulders'] },
+    { keys: ['frontraise'], tags: ['Shoulders'] },
+    // Arms
+    { keys: ['curl'], tags: ['Biceps'] },
+    { keys: ['tricep', 'skullcrusher', 'pushdown', 'kickback'], tags: ['Triceps'] },
+    // Core
+    { keys: ['plank'], tags: ['Core'] },
+    { keys: ['crunch', 'situp'], tags: ['Core'] },
+    { keys: ['legraise'], tags: ['Core'] },
+    { keys: ['woodchopper'], tags: ['Core'] },
+    { keys: ['mountainclimber'], tags: ['Core'] },
+    { keys: ['carry'], tags: ['Core', 'Back'] },
+    // Grip / hang work - checked after 'legraise' above so "Hanging Leg
+    // Raise" (normalizes to "hanginglegraise") is caught by that Core rule
+    // first, not miscategorized here as Back via the generic "hang" match.
+    { keys: ['deadhang', 'barhang', 'activehang', 'hang'], tags: ['Back', 'Biceps'] },
+    // Cardio / conditioning
+    { keys: ['rowingmachine', 'rowerg', 'erg'], tags: ['Back', 'Quads'] },
+    { keys: ['assaultbike', 'airbike', 'spinbike', 'cycling', 'bike'], tags: ['Quads'] },
+    { keys: ['sledpush', 'sleddrag'], tags: ['Quads', 'Glutes'] },
+    { keys: ['run', 'sprint', 'jog', 'treadmill'], tags: ['Quads', 'Hamstrings'] },
+    { keys: ['jumprope', 'jump'], tags: ['Calves', 'Quads'] },
+    { keys: ['swim'], tags: ['Shoulders', 'Back', 'Core'] },
+    // Generic fallback presses, after every specific press variant above
+    { keys: ['press'], tags: ['Chest', 'Shoulders', 'Triceps'] },
+  ];
+  function guessTagsForExercise(name) {
+    const norm = normalizeExerciseName(name);
+    for (const entry of AUTO_TAG_KEYWORDS) {
+      if (entry.keys.some(k => norm.includes(k))) return entry.tags;
+    }
+    return [];
+  }
+  window.autoTagUntagged = () => {
+    const untagged = getAllUniqueCanonicalExercises().filter(n => getExerciseTags(n).length === 0);
+    const guesses = untagged.map(n => ({ name: n, tags: guessTagsForExercise(n) })).filter(g => g.tags.length);
+    if (!guesses.length) { alert(untagged.length ? 'No keyword matches found for the remaining untagged exercises - tag them manually below.' : 'Everything is already tagged!'); return; }
+    if (!confirm(`Auto-tag ${guesses.length} untagged exercise(s) based on their name (e.g. "row" → Back/Biceps)? Already-tagged exercises are never touched. You can review and adjust any guess afterward.`)) return;
+    guesses.forEach(g => { data.exerciseTags[g.name] = g.tags; });
+    save();
+    alert(`Auto-tagged ${guesses.length} exercise(s).${guesses.length < untagged.length ? ` (${untagged.length - guesses.length} had no keyword match and still need manual tags.)` : ''}`);
+    renderInsights();
+  };
+
   // ----- EXERCISE MANAGEMENT: RENAME & MERGE (v3.8.0, additive) -----
   // Core consolidation routine used by BOTH rename and merge (a rename is
   // just a 1-source merge): rewrites every raw exercise-name string in
@@ -1170,6 +1248,7 @@
       <h3>🏷️ Exercise Tagging</h3>
       <p style="color:var(--text-secondary); margin-bottom:0;">${tagged.length}/${allExercises.length || 0} exercises tagged (${pct}%)</p>
       <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%;"></div></div>
+      ${untagged.length ? `<button class="small-btn" onclick="autoTagUntagged()">✨ Auto-tag ${untagged.length} untagged exercise${untagged.length===1?'':'s'} by keyword</button>` : ''}
       ${!allExercises.length ? '<p>No exercises yet - add some to your templates or log a Quick Workout first.</p>' : ''}
       ${untagged.length ? `<h4>Untagged (${untagged.length})</h4>${untagged.map(renderTagRow).join('')}` : ''}
       ${tagged.length ? `<h4>Tagged (${tagged.length})</h4>${tagged.map(renderTagRow).join('')}` : ''}
@@ -2062,77 +2141,6 @@
   window.exportHistory = () => { const blob = new Blob([JSON.stringify(data.history,null,2)], {type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `workout_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href); };
   window.importHistoryPrompt = () => { const input = document.createElement('input'); input.type='file'; input.accept='.json'; input.onchange = e => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=ev=>{ try{ const imported=JSON.parse(ev.target.result); if(Array.isArray(imported)){ data.history.push(...imported.filter(x=>x.templateName && x.logs)); save(); renderHome(); alert('Imported'); } }catch(e){ alert('Invalid'); } }; reader.readAsText(file); }; input.click(); };
   
-  // ----- SYNTHETIC TEST DATA GENERATOR (v3.7.0, additive, developer-only) -----
-  // Purely ADDS realistic-looking sample workouts/bodyweight entries so
-  // charts, analytics, streaks, PRs and Relative Strength have something to
-  // show while testing. Every generated entry is flagged `synthetic: true`
-  // (an extra field the rest of the app simply ignores, same as any other
-  // additive field), so it can be identified and removed later without ever
-  // touching real logged data. Nothing existing is read, modified, or
-  // overwritten - only data.history.push(...) / data.bodyWeight.push(...).
-  const SYNTHETIC_EXERCISE_POOL = [
-    'Barbell Back Squat', 'Barbell Bench Press', 'Conventional Deadlift', 'Barbell Overhead Press',
-    'Barbell Bent Over Row', 'Lat Pulldown', 'Dumbbell Romanian Deadlift', 'Leg Press Machine',
-    'Dumbbell Shoulder Press', 'Seated Cable Row', 'Dumbbell Curl', 'Cable Tricep Pushdown',
-    // Deliberately NOT in BUILT_IN_EXERCISE_DB, to test custom-exercise handling end to end
-    // (analytics, muscle tagging fallback, and Relative Strength keyword detection):
-    'Dex Row Variation', 'High Incline Smith Press', 'Cable Rear Delt Sweep'
-  ];
-  function synthRandInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-  function synthRandStep(min, max, step) { return Math.round((min + Math.random() * (max - min)) / step) * step; }
-  function synthShuffle(arr) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-  window.generateSyntheticTestData = () => {
-    if (!confirm('Developer option: generate 8-12 weeks of realistic sample workouts and bodyweight entries for testing charts/analytics?\n\nThis only ADDS data - your real workout history and bodyweight entries are never modified, overwritten, or removed.')) return;
-    const weeks = synthRandInt(8, 12);
-    const today = new Date();
-    const startDate = new Date(today); startDate.setDate(startDate.getDate() - weeks * 7);
-    const progress = {};
-    SYNTHETIC_EXERCISE_POOL.forEach(name => { progress[name] = { weight: synthRandStep(20, 60, 2.5), reps: synthRandInt(6, 10) }; });
-    const persons = data.loveyMode ? (data.weightUsers.length ? data.weightUsers : ['Dexter', 'Cheryl']) : [data.soloUserName];
-    const currentWeight = {}; persons.forEach(p => { currentWeight[p] = synthRandStep(60, 90, 0.5); });
-    const newHistory = [], newBodyWeight = [];
-    let weekStart = new Date(startDate);
-    for (let w = 0; w < weeks; w++) {
-      const plateauWeek = Math.random() < 0.15; // occasional plateau: no weight increase this week
-      [1, 3, 5].forEach(dayOffset => { // roughly Mon/Wed/Fri
-        if (Math.random() < 0.12) return; // occasional missed session
-        const sessionDate = new Date(weekStart); sessionDate.setDate(sessionDate.getDate() + dayOffset); sessionDate.setHours(synthRandInt(7, 19), synthRandInt(0, 59), 0, 0);
-        if (sessionDate > today) return;
-        const picks = synthShuffle(SYNTHETIC_EXERCISE_POOL).slice(0, synthRandInt(3, 5));
-        const logs = picks.map(name => {
-          const p = progress[name];
-          if (!plateauWeek && Math.random() < 0.7) p.weight = Math.round((p.weight * (1 + synthRandStep(1, 4, 0.5) / 100)) * 2) / 2; // progressive overload
-          const sets = Array.from({ length: synthRandInt(3, 4) }, () => ({ weight: String(p.weight), reps: String(Math.max(1, p.reps + synthRandInt(-1, 1))) }));
-          return { name, sets };
-        });
-        newHistory.push({ date: sessionDate.toISOString(), templateName: 'Sample Workout (generated)', logs, synthetic: true });
-      });
-      persons.forEach(p => {
-        currentWeight[p] = Math.round((currentWeight[p] + (synthRandStep(-4, 3, 1) / 10)) * 10) / 10;
-        const wDate = new Date(weekStart); wDate.setDate(wDate.getDate() + synthRandInt(0, 6)); wDate.setHours(8, 0, 0, 0);
-        if (wDate <= today) newBodyWeight.push({ date: wDate.toISOString(), weight: currentWeight[p], person: p, synthetic: true });
-      });
-      weekStart.setDate(weekStart.getDate() + 7);
-    }
-    data.history.push(...newHistory);
-    data.bodyWeight.push(...newBodyWeight);
-    data.history.sort((a, b) => new Date(a.date) - new Date(b.date));
-    data.bodyWeight.sort((a, b) => new Date(a.date) - new Date(b.date));
-    save();
-    alert(`Added ${newHistory.length} sample workouts and ${newBodyWeight.length} sample bodyweight entries.`);
-    renderHome();
-  };
-  window.clearSyntheticTestData = () => {
-    const histCount = data.history.filter(h => h.synthetic).length;
-    const bwCount = data.bodyWeight.filter(w => w.synthetic).length;
-    if (!histCount && !bwCount) { alert('No generated sample data found.'); return; }
-    if (!confirm(`Remove ${histCount} sample workout(s) and ${bwCount} sample bodyweight entr${bwCount===1?'y':'ies'}? Your real data is never affected.`)) return;
-    data.history = data.history.filter(h => !h.synthetic);
-    data.bodyWeight = data.bodyWeight.filter(w => !w.synthetic);
-    save();
-    renderHome();
-  };
-
   // FIX: plain btoa()/atob() throw on any character outside Latin-1 (emoji,
   // most non-English scripts), which would silently crash Share/Import for
   // anyone with such characters in a template or exercise name. These
@@ -2293,7 +2301,6 @@
       <button onclick="createTemplate()">➕ Create Workout</button><button onclick="startQuickWorkout()">⚡ Quick Workout</button><button onclick="showInsights()">📊 Progress &amp; Stats</button><button onclick="exportPrompt()">🔗 Share / Import Workouts</button>
       <div id="templateList">${data.templates.map(t=>`<div class="template-item template-item-tappable" onclick="startWorkout('${t.id}')"><div><b>${t.name}</b> <span style="color:var(--text-secondary);">${t.exercises.length} ex</span></div><div class="flex-row"><button class="small-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')">✏️ Edit</button><button class="small-btn" onclick="event.stopPropagation(); deleteTemplate('${t.id}')">🗑️</button><button class="small-btn" onclick="event.stopPropagation(); selectForShare('${t.id}')">🔗 Select</button></div></div>`).join('')}</div>
       <h3>📜 History (${data.history.length})</h3><div class="import-export-bar"><button onclick="exportHistory()">📤 Export</button><button onclick="importHistoryPrompt()">📥 Import</button><button class="btn-danger" onclick="clearAllHistory()">🗑️ Clear All</button></div>
-      <div class="import-export-bar"><button class="small-btn" onclick="generateSyntheticTestData()">🧪 Dev: Generate Sample Data</button><button class="small-btn" onclick="clearSyntheticTestData()">🧹 Dev: Remove Sample Data</button></div>
       <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; const isEditingDate = editingDateForHistoryEntry===s; const entryDate = new Date(s.date); return `<div class="history-item"><div><b>${s.templateName}</b> ${isEditingDate ? `<span class="flex-row" style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;"><input type="date" value="${toLocalDateInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryDate(${realIdx}, this.value)"><input type="time" value="${toLocalTimeInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryTime(${realIdx}, this.value)"><button class="small-btn" onclick="toggleEditHistoryDate(${realIdx})">✔️ Done</button></span>` : `<span style="color:var(--text-secondary); cursor:pointer;" onclick="toggleEditHistoryDate(${realIdx})">${entryDate.toLocaleString()} 📅</span>`}</div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
     `;
     if (selectedShareIds.length) { let bar = document.getElementById('shareBar'); if(!bar){ bar=document.createElement('div'); bar.id='shareBar'; bar.className='sticky-share-bar'; app.appendChild(bar); } bar.innerHTML = `<span>${selectedShareIds.length} selected</span><button class="small-btn" onclick="copyShareLink()">📋 Copy link</button><button class="small-btn btn-danger" onclick="selectedShareIds=[]; renderHome();">✖ Clear</button>`; }
