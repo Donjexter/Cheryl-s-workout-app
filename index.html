@@ -409,7 +409,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.10.1';
+  const APP_VERSION = '3.10.2';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -994,6 +994,23 @@
     }
     return [];
   }
+  window.copyUntaggedList = () => {
+    const untagged = getAllUniqueCanonicalExercises().filter(n => getExerciseTags(n).length === 0);
+    if (!untagged.length) { alert('Nothing to copy - every exercise is tagged!'); return; }
+    // Usage counts only (no weights, dates or bodyweight) so the list is safe to share.
+    const counts = {};
+    data.history.forEach(h => (h.logs || []).forEach(l => { const c = getCanonicalExerciseName(l.name) || l.name; counts[c] = (counts[c] || 0) + 1; }));
+    const rows = untagged.map(n => ({ name: n, used: counts[n] || 0, matched: guessTagsForExercise(n).length > 0 }))
+      .sort((a, b) => (a.matched - b.matched) || (b.used - a.used) || a.name.localeCompare(b.name));
+    const unmatched = rows.filter(r => !r.matched).length;
+    const text = `Untagged exercises (${rows.length}; ${unmatched} not matched by keyword auto-tag, listed first):\n` +
+      rows.map(r => `- ${r.name} (used in ${r.used} workout${r.used === 1 ? '' : 's'})${r.matched ? '' : ' [no keyword match]'}`).join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => alert('Untagged exercise list copied!')).catch(() => prompt('Could not copy automatically. Copy this list:', text));
+    } else {
+      prompt('Copy this list:', text);
+    }
+  };
   window.autoTagUntagged = () => {
     const untagged = getAllUniqueCanonicalExercises().filter(n => getExerciseTags(n).length === 0);
     const guesses = untagged.map(n => ({ name: n, tags: guessTagsForExercise(n) })).filter(g => g.tags.length);
@@ -1248,7 +1265,7 @@
       <h3>🏷️ Exercise Tagging</h3>
       <p style="color:var(--text-secondary); margin-bottom:0;">${tagged.length}/${allExercises.length || 0} exercises tagged (${pct}%)</p>
       <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%;"></div></div>
-      ${untagged.length ? `<button class="small-btn" onclick="autoTagUntagged()">✨ Auto-tag ${untagged.length} untagged exercise${untagged.length===1?'':'s'} by keyword</button>` : ''}
+      ${untagged.length ? `<button class="small-btn" onclick="autoTagUntagged()">✨ Auto-tag ${untagged.length} untagged exercise${untagged.length===1?'':'s'} by keyword</button> <button class="small-btn" onclick="copyUntaggedList()">📋 Copy untagged list</button>` : ''}
       ${!allExercises.length ? '<p>No exercises yet - add some to your templates or log a Quick Workout first.</p>' : ''}
       ${untagged.length ? `<h4>Untagged (${untagged.length})</h4>${untagged.map(renderTagRow).join('')}` : ''}
       ${tagged.length ? `<h4>Tagged (${tagged.length})</h4>${tagged.map(renderTagRow).join('')}` : ''}
