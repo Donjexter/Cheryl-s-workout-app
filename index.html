@@ -409,7 +409,7 @@
 
 <script>
 (function() {
-  const APP_VERSION = '3.10.2';
+  const APP_VERSION = '3.11.0';
   // v3.1.0 CHANGE (only behavioral change vs 3.0.0):
   //   "+ Add Exercise" is no longer hidden for template-based workouts or for
   //   saved history entries opened for editing — you can now add a brand-new
@@ -1704,10 +1704,41 @@
   };
 
   // Override exercise dashboard and detail views to include delete button
+  // ----- SCROLL PRESERVATION -----
+  // Every screen re-renders by replacing #app's innerHTML, which used to reset
+  // the page to the top (and the horizontal tab strip back to its first tab)
+  // on every tab tap, tag toggle, filter change, etc. When a render replaces
+  // the SAME screen that was already showing, restore the page scroll position
+  // and the tab strip's horizontal scroll; moving to a different screen still
+  // starts at the top.
+  let lastRenderedScreen = null;
+  function captureScroll(screen) {
+    const same = lastRenderedScreen === screen;
+    lastRenderedScreen = screen;
+    if (!same) return null;
+    const bar = document.querySelector('.insights-tabbar');
+    return { y: window.scrollY, barX: bar ? bar.scrollLeft : 0 };
+  }
+  function restoreScroll(state) {
+    if (!state) { window.scrollTo(0, 0); return; }
+    const bar = document.querySelector('.insights-tabbar');
+    if (bar) {
+      bar.scrollLeft = state.barX;
+      // Keep the active tab fully visible in the strip without moving the page.
+      const active = bar.querySelector('.insights-tab-btn.active');
+      if (active) {
+        if (active.offsetLeft < bar.scrollLeft) bar.scrollLeft = active.offsetLeft - 8;
+        else if (active.offsetLeft + active.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = active.offsetLeft + active.offsetWidth - bar.clientWidth + 8;
+      }
+    }
+    window.scrollTo(0, state.y);
+  }
+
   function renderWorkoutDashboard() {
     const w = data.activeWorkout;
     const isHistoryEdit = w.editingHistoryIndex !== undefined;
     const app = document.getElementById("app");
+    const scrollState = captureScroll('dashboard');
     app.innerHTML = `
       <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
         ${isHistoryEdit ? `<button onclick="finishWorkout(true)">💾 Save Changes</button><button onclick="cancelEdit()">✖ Cancel</button>` : `<button onclick="endWorkout()">🏁 End Workout</button>`}
@@ -1748,6 +1779,7 @@
       <button onclick="showAddExercise()">+ Add Exercise</button>
       ${(w.isQuickWorkout && w.logs.length === 0) ? `<button onclick="generateRandomWorkout()">🎲 Generate Workout</button>` : ''}
     `;
+    restoreScroll(scrollState);
     resumeTimerIfNeeded();
   }
 
@@ -1897,6 +1929,7 @@
     const exercise = w.logs[exIndex];
     const pastHint = getPastPerformance(exercise.name);
     const overloadSuggestion = getOverloadSuggestion(exercise.name);
+    lastRenderedScreen = null;
     const app = document.getElementById("app");
     app.innerHTML = `
       <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
@@ -2033,6 +2066,7 @@
     const dbOnlyNames = BUILT_IN_EXERCISE_NAMES.filter(n => !usedNorm.has(normalizeExerciseName(n)));
     const optionNames = (addExerciseShowAll ? canonicalNames.concat(dbOnlyNames) : canonicalNames).sort((a, b) => a.localeCompare(b));
     const isNew = prefill?.selectValue === '__new__';
+    lastRenderedScreen = null;
     const app = document.getElementById("app");
     app.innerHTML = `
       <button onclick="goToDashboard()">← Back to Workout</button>
@@ -2275,6 +2309,7 @@
   function renderInsights() {
     const app = document.getElementById('app');
     applyTheme();
+    const scrollState = captureScroll('insights');
     const tabs = [
       { id: 'progress', label: '📈 Progress' },
       { id: 'strength', label: '💪 Relative Strength' },
@@ -2299,12 +2334,14 @@
       ${tabBar}
       ${body}
     `;
+    restoreScroll(scrollState);
   }
   window.renderInsights = renderInsights;
 
   function renderHome() {
     const app = document.getElementById("app");
     applyTheme();
+    const scrollState = captureScroll('home');
     const now = new Date(), target = new Date(now.getFullYear(),8,29); if(now>target) target.setFullYear(target.getFullYear()+1);
     const diffDays = Math.floor((target-now)/(1000*60*60*24)), diffHours = Math.floor(((target-now)%(1000*60*60*24))/(1000*60*60));
     const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until 29th September ❤️`;
@@ -2321,10 +2358,11 @@
       <div>${data.history.slice().reverse().map((s,idx)=>{ const realIdx=data.history.length-1-idx; const isEditingDate = editingDateForHistoryEntry===s; const entryDate = new Date(s.date); return `<div class="history-item"><div><b>${s.templateName}</b> ${isEditingDate ? `<span class="flex-row" style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;"><input type="date" value="${toLocalDateInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryDate(${realIdx}, this.value)"><input type="time" value="${toLocalTimeInputValue(entryDate)}" style="width:auto;" onchange="updateHistoryTime(${realIdx}, this.value)"><button class="small-btn" onclick="toggleEditHistoryDate(${realIdx})">✔️ Done</button></span>` : `<span style="color:var(--text-secondary); cursor:pointer;" onclick="toggleEditHistoryDate(${realIdx})">${entryDate.toLocaleString()} 📅</span>`}</div><details><summary>Details</summary>${s.logs.map(l=>`<div><b>${l.name}</b><br>${l.sets.map((set,i)=>`Set ${i+1}: ${set.weight||'?'}kg × ${set.reps||'?'} reps`).join('<br>')}</div>`).join('')}</details><div class="history-actions"><button class="small-btn" onclick="editHistoryEntry(${realIdx})">✏️ Edit</button><button class="small-btn btn-danger" onclick="deleteHistoryEntry(${realIdx})">Delete</button></div></div>`; }).join('')}</div>
     `;
     if (selectedShareIds.length) { let bar = document.getElementById('shareBar'); if(!bar){ bar=document.createElement('div'); bar.id='shareBar'; bar.className='sticky-share-bar'; app.appendChild(bar); } bar.innerHTML = `<span>${selectedShareIds.length} selected</span><button class="small-btn" onclick="copyShareLink()">📋 Copy link</button><button class="small-btn btn-danger" onclick="selectedShareIds=[]; renderHome();">✖ Clear</button>`; }
+    restoreScroll(scrollState);
   }
   function renderWorkout() { if (!data.activeWorkout) renderHome(); else if (data.activeWorkout.currentView === 'dashboard') renderWorkoutDashboard(); else if (typeof data.activeWorkout.currentView === 'number') renderExerciseDetail(data.activeWorkout.currentView); else renderWorkoutDashboard(); }
   window.renderHome = renderHome;
-  window.editTemplate = (id) => { const i=findTemplateIndex(id); if(i===-1) return renderHome(); const t=data.templates[i]; const appDiv=document.getElementById("app"); applyTheme(); appDiv.innerHTML=`<button onclick="renderHome()">← Back</button><h2>${t.name} <button class="small-btn" onclick="renameTemplate('${id}')">✏️ Rename</button></h2><label>Rest (s)</label><input value="${t.rest}" onchange="updateRest('${id}',this.value)"><h3>Exercises</h3><div>${t.exercises.map((e,ei)=>`<div class="exercise-card"><div><b>${e.name}</b> (${e.sets} sets)</div><div class="flex-row"><button class="small-btn" onclick="editExercise('${id}',${ei})">✏️</button><button class="small-btn btn-danger" onclick="deleteExercise('${id}',${ei})">🗑️</button></div></div>`).join('')}</div><button onclick="addExercise('${id}')">+ Add Exercise</button>`; };
+  window.editTemplate = (id) => { lastRenderedScreen = null; const i=findTemplateIndex(id); if(i===-1) return renderHome(); const t=data.templates[i]; const appDiv=document.getElementById("app"); applyTheme(); appDiv.innerHTML=`<button onclick="renderHome()">← Back</button><h2>${t.name} <button class="small-btn" onclick="renameTemplate('${id}')">✏️ Rename</button></h2><label>Rest (s)</label><input value="${t.rest}" onchange="updateRest('${id}',this.value)"><h3>Exercises</h3><div>${t.exercises.map((e,ei)=>`<div class="exercise-card"><div><b>${e.name}</b> (${e.sets} sets)</div><div class="flex-row"><button class="small-btn" onclick="editExercise('${id}',${ei})">✏️</button><button class="small-btn btn-danger" onclick="deleteExercise('${id}',${ei})">🗑️</button></div></div>`).join('')}</div><button onclick="addExercise('${id}')">+ Add Exercise</button>`; };
   window.editExercise = (templateId, exIdx) => { const i=findTemplateIndex(templateId); if(i===-1) return; const ex = data.templates[i].exercises[exIdx]; const newName = prompt("Name:", ex.name); if(newName) ex.name = getCanonicalExerciseName(newName) || newName.trim(); const newSets = prompt("Sets:", ex.sets); if(newSets) ex.sets = parseInt(newSets) || ex.sets; save(); editTemplate(templateId); };
   window.deleteExercise = (templateId, exIdx) => { const i=findTemplateIndex(templateId); if(i!==-1){ data.templates[i].exercises.splice(exIdx,1); save(); editTemplate(templateId); } };
   window.updateRest = (id,val) => { const i=findTemplateIndex(id); if(i!==-1) data.templates[i].rest = parseInt(val); save(); };
