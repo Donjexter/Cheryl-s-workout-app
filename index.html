@@ -2342,9 +2342,9 @@
     const app = document.getElementById("app");
     applyTheme();
     const scrollState = captureScroll('home');
-    const now = new Date(), target = new Date(now.getFullYear(),8,29); if(now>target) target.setFullYear(target.getFullYear()+1);
+    const now = new Date(), target = new Date(now.getFullYear(),0,6); if(now>target) target.setFullYear(target.getFullYear()+1);
     const diffDays = Math.floor((target-now)/(1000*60*60*24)), diffHours = Math.floor(((target-now)%(1000*60*60*24))/(1000*60*60));
-    const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until 29th September ❤️`;
+    const countdownText = `❤️ ${diffDays} days, ${diffHours} hours until 6th Jan ❤️`;
     app.innerHTML = `
       <div class="theme-picker">
         <div class="theme-swatches">${THEMES.map(t => `<button class="swatch-btn ${data.theme===t.id?'active':''}" style="--swatch:${t.swatch}" title="${t.label}" onclick="setTheme('${t.id}')"></button>`).join('')}</div>
