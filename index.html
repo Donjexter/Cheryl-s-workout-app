@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Workout Tracker · v3.3.3 (Themes, tap-editable timers, smart weight parsing)</title>
+<title>Workout Tracker · v3.8.0 (Progress session breakdown) · was v3.3.3 (Themes, tap-editable timers, smart weight parsing)</title>
 <style>
   /* ----- THEME VARIABLES (applied to body) -----
      v3.3.0: themes are now purely cosmetic color palettes. The old
@@ -719,6 +719,30 @@
     });
     points.sort((a, b) => new Date(a.date) - new Date(b.date));
     return points;
+  }
+
+  // v3.8.0 (additive, read-only): same inputs as getOneRmHistory, but returns the
+  // full per-session breakdown (every set, which sets were eligible for a 1RM
+  // estimate, and which one produced the session's best) so the Progress tab can
+  // show exactly what each chart point was calculated from. Newest first.
+  function getOneRmSessions(exerciseName, formula) {
+    const useFormula = formula || data.oneRmFormula || 'brzycki';
+    const out = [];
+    data.history.forEach(entry => {
+      const exLog = entry.logs.find(l => l.name === exerciseName);
+      if (!exLog) return;
+      let bestIdx = -1, bestEst = null;
+      const sets = exLog.sets.map((s, i) => {
+        const w = parseFloat(s.weight), r = parseInt(s.reps);
+        const est = estimateOneRM(w, r, useFormula);
+        if (est !== null && (bestEst === null || est > bestEst)) { bestEst = est; bestIdx = i; }
+        return { weight: s.weight, reps: s.reps, est, filled: !!(w && r) };
+      });
+      if (!sets.some(s => s.filled)) return;
+      out.push({ date: entry.date, templateName: entry.templateName, sets, bestIdx, bestEst: bestEst === null ? null : Math.round(bestEst * 10) / 10 });
+    });
+    out.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return out;
   }
 
   // ----- MUSCLE GROUP TAGGING (v3.4.0, additive) -----
@@ -1607,7 +1631,7 @@
     `;
   }
 
-  function buildOneRmChartSvg(points) {
+  function buildOneRmChartSvg(points, selectedDate) {
     const w = 560, h = 220, padL = 45, padR = 15, padT = 15, padB = 30;
     const values = points.map(p => p.oneRM);
     let min = Math.min(...values), max = Math.max(...values);
@@ -1616,7 +1640,13 @@
     const x = i => padL + (points.length === 1 ? 0 : (i / (points.length - 1)) * (w - padL - padR));
     const y = v => padT + (1 - (v - min) / range) * (h - padT - padB);
     const linePoints = points.map((p, i) => `${x(i).toFixed(1)},${y(p.oneRM).toFixed(1)}`).join(' ');
-    const dots = points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.oneRM).toFixed(1)}" r="4" fill="var(--accent)"><title>${new Date(p.date).toLocaleDateString()}: ${p.oneRM}kg est. 1RM</title></circle>`).join('');
+    const dots = points.map((p, i) => {
+      const cx = x(i).toFixed(1), cy = y(p.oneRM).toFixed(1), sel = p.date === selectedDate;
+      return `<g onclick="selectProgressPoint(${i})" style="cursor:pointer;">
+        <circle cx="${cx}" cy="${cy}" r="16" fill="transparent"></circle>
+        <circle cx="${cx}" cy="${cy}" r="${sel ? 7 : 4}" fill="var(--accent)" ${sel ? 'stroke="var(--text)" stroke-width="2"' : ''}><title>${new Date(p.date).toLocaleDateString()}: ${p.oneRM}kg est. 1RM</title></circle>
+      </g>`;
+    }).join('');
     const labels = points.map((p, i) => (points.length <= 8 || i === 0 || i === points.length - 1 || i % Math.ceil(points.length / 6) === 0)
       ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="9" text-anchor="middle" fill="var(--text-secondary)">${new Date(p.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</text>` : '').join('');
     return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto; background:var(--surface); border-radius:10px;">
@@ -2380,6 +2410,68 @@
   
   // ----- PROGRESS SCREEN (v3.2.0, additive, read-only) -----
   let progressExercise = null;
+  let progressShowAllSessions = false;
+  window.toggleProgressSessions = () => { progressShowAllSessions = !progressShowAllSessions; renderInsights(); };
+  function buildSetChipsHtml(sess) {
+    return sess.sets.map((st, i) => {
+        if (!st.filled) return `<span style="opacity:0.4; margin-right:10px; white-space:nowrap;">Set ${i + 1}: —</span>`;
+        const isBest = i === sess.bestIdx;
+        const counted = st.est !== null;
+        return `<span style="display:inline-block; margin:2px 6px 2px 0; padding:3px 8px; border-radius:999px; white-space:nowrap; font-size:0.9em; ${isBest ? 'background:var(--accent); color:#fff; font-weight:600;' : 'background:var(--surface-light);'} ${counted ? '' : 'opacity:0.55;'}">${isBest ? '⭐ ' : ''}${st.weight}kg × ${st.reps}</span>`;
+    }).join('');
+  }
+  let progressSelectedDate = null;
+  window.selectProgressPoint = (i) => {
+    const pts = getOneRmHistory(progressExercise);
+    const d = pts[i] && pts[i].date;
+    progressSelectedDate = (progressSelectedDate === d) ? null : d;
+    const y = window.scrollY; renderInsights(); window.scrollTo(0, y);
+  };
+  function buildProgressPreviewHtml(exerciseName) {
+    const hint = `<p style="color:var(--text-secondary); font-size:0.85em; margin:6px 0;">Tap a point on the chart to preview that session's sets.</p>`;
+    if (!progressSelectedDate) return hint;
+    const sess = getOneRmSessions(exerciseName).find(x => x.date === progressSelectedDate);
+    if (!sess) return hint;
+    const dateLabel = new Date(sess.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    return `<div class="person-card" style="margin:6px 0 8px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+        <b>${dateLabel}</b>
+        <span>${sess.bestEst !== null ? sess.bestEst + 'kg est. 1RM' : ''} <button class="small-btn" style="min-height:28px; padding:2px 8px;" onclick="selectProgressPoint(-1)">✕</button></span>
+      </div>
+      <div style="margin-top:6px;">${buildSetChipsHtml(sess)}</div>
+    </div>`;
+  }
+  function buildProgressSessionsHtml(exerciseName) {
+    const sessions = getOneRmSessions(exerciseName);
+    if (!sessions.length) return '';
+    const LIMIT = 8;
+    const shown = progressShowAllSessions ? sessions : sessions.slice(0, LIMIT);
+    const cards = shown.map((sess, idx) => {
+      const older = sessions[sessions.indexOf(sess) + 1];
+      let deltaHtml = '';
+      if (older && older.bestEst !== null && sess.bestEst !== null) {
+        const d = Math.round((sess.bestEst - older.bestEst) * 10) / 10;
+        if (d !== 0) deltaHtml = ` <span class="delta ${d > 0 ? 'trend-up' : 'trend-down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</span>`;
+      }
+      const dateLabel = new Date(sess.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      const chips = buildSetChipsHtml(sess);
+      const hasUncounted = sess.sets.some(st => st.filled && st.est === null);
+      return `<div class="person-card" style="margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+          <b>${dateLabel}</b>
+          <span>${sess.bestEst !== null ? sess.bestEst + 'kg est. 1RM' : 'no 1RM'}${deltaHtml}</span>
+        </div>
+        ${sess.templateName ? `<div style="color:var(--text-secondary); font-size:0.8em;">${String(sess.templateName).replace(/</g,'&lt;')}</div>` : ''}
+        <div style="margin-top:6px;">${chips}</div>
+        ${hasUncounted ? `<div style="color:var(--text-secondary); font-size:0.75em; margin-top:2px;">Faded sets are over 12 reps, so they're not used for 1RM estimates.</div>` : ''}
+      </div>`;
+    }).join('');
+    const more = sessions.length > LIMIT
+      ? `<button onclick="toggleProgressSessions()">${progressShowAllSessions ? 'Show fewer' : `Show all ${sessions.length} sessions`}</button>` : '';
+    return `<h3>🗓️ Sessions behind the chart</h3>
+      <p style="color:var(--text-secondary); font-size:0.85em; margin-top:-4px;">⭐ marks the set each session's 1RM was calculated from. Newest first.</p>
+      ${cards}${more}`;
+  }
   window.showProgress = () => {
     if (!progressExercise) {
       const names = getAllUniqueCanonicalExercises();
@@ -2387,7 +2479,7 @@
     }
     showInsights('progress');
   };
-  window.selectProgressExercise = (name) => { progressExercise = name; renderInsights(); };
+  window.selectProgressExercise = (name) => { progressExercise = name; progressSelectedDate = null; renderInsights(); };
   function buildProgressTabHtml() {
     const names = getAllUniqueCanonicalExercises();
     let body;
@@ -2397,7 +2489,7 @@
       if (!progressExercise || !names.includes(progressExercise)) progressExercise = names[0];
       const points = getOneRmHistory(progressExercise);
       if (points.length < 2) {
-        body = `<p>Not enough logged sessions for "${progressExercise}" yet (need at least 2 sessions with weight &amp; reps logged). Keep logging and check back!</p>`;
+        body = `<p>Not enough logged sessions for "${progressExercise}" yet (need at least 2 sessions with weight &amp; reps logged). Keep logging and check back!</p>${buildProgressSessionsHtml(progressExercise)}`;
       } else {
         const first = points[0].oneRM, last = points[points.length - 1].oneRM;
         const delta = Math.round((last - first) * 10) / 10;
@@ -2405,12 +2497,14 @@
         const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '●');
         const formulaLabel = (ONE_RM_FORMULAS[data.oneRmFormula] || ONE_RM_FORMULAS.brzycki).label;
         body = `
-          ${buildOneRmChartSvg(points)}
+          ${buildProgressPreviewHtml(progressExercise)}
+          ${buildOneRmChartSvg(points, progressSelectedDate)}
           <div class="person-card" style="margin-top:10px;">
             <b>Estimated 1RM (${formulaLabel})</b><br>
             First logged: ${first}kg → Latest: ${last}kg
             <br><span class="delta ${deltaClass}">${arrow} ${Math.abs(delta)}kg since first tracked session</span>
           </div>
+          ${buildProgressSessionsHtml(progressExercise)}
         `;
       }
     }
